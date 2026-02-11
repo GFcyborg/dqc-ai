@@ -11,5 +11,6 @@ __author__ = 'DQC-AI Team'
 from . import parser
 from . import analyzer
 from . import gui
+from . import choreo
 
-__all__ = ['parser', 'analyzer', 'gui']
+__all__ = ['parser', 'analyzer', 'gui', 'choreo']
