@@ -1,0 +1,289 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.dqc'
+version = '1.0.0'
+
+/**
+ * Build Configuration for DQC - OpenQASM Splitter
+ * 
+ * Gradle Tasks:
+ *   ./gradlew build                   - Build everything (parsers + dependencies)
+ *   ./gradlew run                     - Run the DQC - OpenQASM Splitter GUI (auto-runs build if needed)
+ *   ./gradlew test                    - Run all tests
+ *   ./gradlew clean                   - Clean all build artifacts, Python cache, and .venv
+ *   ./gradlew cleanPython             - Clean only Python artifacts (.venv, __pycache__, .pyc files)
+ *   ./gradlew cleanGrammar            - Clean only ANTLR-generated parser files
+ */
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    antlr4Tool
+}
+
+dependencies {
+    antlr4Tool "org.antlr:antlr4:4.13.2"
+}
+
+task downloadGrammar {
+    description = 'Downloads the OpenQASM 3.0 grammar from the official repository'
+    
+    def grammarDir = file("${project.projectDir}/src/main/antlr4")
+    def grammarUrl = 'https://raw.githubusercontent.com/openqasm/openqasm/main/source/grammar/qasm3Lexer.g4'
+    def parserUrl = 'https://raw.githubusercontent.com/openqasm/openqasm/main/source/grammar/qasm3Parser.g4'
+    
+    doLast {
+        grammarDir.mkdirs()
+        ant.get(src: grammarUrl, dest: "${grammarDir}/qasm3Lexer.g4", skipexisting: false)
+        ant.get(src: parserUrl, dest: "${grammarDir}/qasm3Parser.g4", skipexisting: false)
+        println "Grammar files downloaded"
+    }
+}
+
+task generateQASM3Parsers(type: JavaExec) {
+    dependsOn downloadGrammar
+    
+    def grammarDir = file("${project.projectDir}/src/main/antlr4")
+    def outputDir = file("${project.projectDir}/src/main/python/parser/generated")
+    def outputPath = project.relativePath(outputDir)
+    
+    mainClass = 'org.antlr.v4.Tool'
+    classpath = configurations.antlr4Tool
+    
+    args = [
+        '-Dlanguage=Python3',
+        '-visitor',
+        '-no-listener',
+        '-o', outputPath,
+        "${grammarDir}/qasm3Lexer.g4",
+        "${grammarDir}/qasm3Parser.g4"
+    ]
+    
+    inputs.files(fileTree(grammarDir).include('qasm3*.g4'))
+    outputs.dir(outputDir)
+    
+    doFirst {
+        outputDir.mkdirs()
+        println "Generating QASM3 parsers to: ${outputDir}"
+    }
+}
+
+task generateDQCParsers(type: JavaExec) {
+    dependsOn downloadGrammar
+    
+    def grammarDir = file("${project.projectDir}/src/main/antlr4")
+    def outputDir = file("${project.projectDir}/src/main/python/parser/generated")
+    def outputPath = project.relativePath(outputDir)
+    
+    mainClass = 'org.antlr.v4.Tool'
+    classpath = configurations.antlr4Tool
+    
+    args = [
+        '-Dlanguage=Python3',
+        '-visitor',
+        '-no-listener',
+        '-o', outputPath,
+        "${grammarDir}/dqcLexer.g4",
+        "${grammarDir}/dqcParser.g4"
+    ]
+    
+    inputs.files("${grammarDir}/dqcLexer.g4", "${grammarDir}/dqcParser.g4")
+    outputs.dir(outputDir)
+    
+    doFirst {
+        outputDir.mkdirs()
+        println "Generating DQC parsers to: ${outputDir}"
+    }
+}
+
+task generateGrammarSource {
+    description = 'Generates Python parsers for OpenQASM 3.0 and DQC'
+    dependsOn generateQASM3Parsers, generateDQCParsers
+}
+
+task setupPythonEnv {
+    description = 'Creates Python virtual environment and installs dependencies'
+    
+    def venvPath = file("${project.projectDir}/.venv")
+    def requirementsFile = file("${project.projectDir}/requirements.txt")
+    def venvRelPath = project.relativePath(venvPath)
+    def requirementsRelPath = project.relativePath(requirementsFile)
+    def workDir = project.projectDir
+    
+    doLast {
+        if (!venvPath.exists()) {
+            println "Creating Python virtual environment..."
+            def createVenv = "python3 -m venv ${venvRelPath}".execute(null, workDir)
+            createVenv.waitFor()
+        }
+        
+        println "Installing Python dependencies..."
+        def pipExe = System.getProperty("os.name").toLowerCase().contains("windows") 
+            ? "${venvRelPath}\\Scripts\\pip.exe" 
+            : "${venvRelPath}/bin/pip"
+        
+        def installDeps = "${pipExe} install -r ${requirementsRelPath}".execute(null, workDir)
+        installDeps.waitFor()
+    }
+}
+
+task setup {
+    description = 'Complete setup: create venv, install dependencies, generate parsers'
+    dependsOn setupPythonEnv, generateGrammarSource
+    
+    doLast {
+        println "\n================================"
+        println "Setup complete!"
+        println "================================"
+    }
+}
+
+build.dependsOn setup
+
+task cleanGrammar {
+    description = 'Cleans up all ANTLR-generated parser files'
+    
+    def parserDir = file("${project.projectDir}/src/main/python/parser/generated")
+    def antlrCache = file("${project.projectDir}/.antlr")
+    def baseDir = project.projectDir.toString()
+    
+    doLast {
+        if (parserDir.exists()) {
+            def relativePath = parserDir.toString().replace(baseDir + File.separator, '')
+            parserDir.deleteDir()
+            println "Deleted: ${relativePath}"
+        }
+        
+        if (antlrCache.exists()) {
+            def relativePath = antlrCache.toString().replace(baseDir + File.separator, '')
+            antlrCache.deleteDir()
+            println "Deleted: ${relativePath}"
+        }
+    }
+}
+
+task cleanPython {
+    description = 'Cleans up Python virtual environment and cache files'
+    
+    def venvDir = file("${project.projectDir}/.venv")
+    def rootDir = file("${project.projectDir}")
+    def baseDir = project.projectDir.toString()
+    def pytestCache = file("${project.projectDir}/.pytest_cache")
+    def distDir = file("${project.projectDir}/dist")
+    def eggsDir = file("${project.projectDir}/.eggs")
+    
+    doLast {
+        // Remove virtual environment
+        if (venvDir.exists()) {
+            println "Deleting Python virtual environment..."
+            venvDir.deleteDir()
+            println "Deleted: .venv"
+        }
+        
+        // Collect __pycache__ directories first, then delete
+        println "Removing __pycache__ directories..."
+        def pycacheDirs = []
+        rootDir.eachFileRecurse { file ->
+            if (file.name == '__pycache__' && file.isDirectory()) {
+                pycacheDirs.add(file)
+            }
+        }
+        pycacheDirs.each { dir ->
+            def relativePath = dir.toString().replace(baseDir + File.separator, '')
+            dir.deleteDir()
+            println "Deleted: ${relativePath}"
+        }
+        
+        // Collect .pyc and .pyo files first, then delete
+        println "Removing Python compiled files..."
+        def compiledFiles = []
+        rootDir.eachFileRecurse { file ->
+            if (file.name.endsWith('.pyc') || file.name.endsWith('.pyo')) {
+                compiledFiles.add(file)
+            }
+        }
+        compiledFiles.each { file -> file.delete() }
+        if (compiledFiles.size() > 0) {
+            println "Deleted ${compiledFiles.size()} .pyc/.pyo files"
+        }
+        
+        // Remove pytest cache
+        if (pytestCache.exists()) {
+            pytestCache.deleteDir()
+            println "Deleted: .pytest_cache"
+        }
+        
+        // Collect egg-info directories first, then delete
+        def eggInfoDirs = []
+        rootDir.eachFileRecurse { file ->
+            if (file.name.endsWith('.egg-info') && file.isDirectory()) {
+                eggInfoDirs.add(file)
+            }
+        }
+        eggInfoDirs.each { dir ->
+            def relativePath = dir.toString().replace(baseDir + File.separator, '')
+            dir.deleteDir()
+            println "Deleted: ${relativePath}"
+        }
+        
+        // Remove dist and eggs if they exist
+        if (distDir.exists()) {
+            distDir.deleteDir()
+            println "Deleted: dist"
+        }
+        
+        if (eggsDir.exists()) {
+            eggsDir.deleteDir()
+            println "Deleted: .eggs"
+        }
+    }
+}
+
+task run(type: Exec) {
+    description = 'Runs the DQC - OpenQASM Splitter GUI application'
+    dependsOn build
+    
+    def venvRelPath = ".venv"
+    def mainRelPath = "main.py"
+    
+    doFirst {
+        println "Running DQC - OpenQASM Splitter..."
+    }
+    
+    if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+        commandLine "${venvRelPath}\\Scripts\\python.exe", mainRelPath
+    } else {
+        commandLine "${venvRelPath}/bin/python3", mainRelPath
+    }
+}
+
+test {
+    description = 'Run Python tests'
+    dependsOn setup
+    
+    def venvRelPath = ".venv"
+    def testDir = file("${project.projectDir}/tests")
+    def workDir = project.projectDir
+    
+    doLast {
+        if (!testDir.exists()) {
+            println "No tests directory found"
+            return
+        }
+        
+        println "Running tests..."
+        def pythonExe = System.getProperty("os.name").toLowerCase().contains("windows")
+            ? "${venvRelPath}\\Scripts\\python.exe"
+            : "${venvRelPath}/bin/python3"
+        
+        def runTests = "${pythonExe} -m pytest tests/".execute(null, workDir)
+        runTests.waitFor()
+    }
+}
+
+clean.dependsOn cleanGrammar, cleanPython
+
