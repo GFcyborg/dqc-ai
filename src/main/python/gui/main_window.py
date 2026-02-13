@@ -9,9 +9,17 @@ from pathlib import Path
 import requests
 import re
 from typing import Dict, List, Tuple
+import json
+import sys
+from threading import Thread
 
 from parser import QasmParser
 from analyzer import VariableAnalyzer
+try:
+    from choreo.controller import Controller
+except ImportError:
+    Controller = None
+
 try:
     from stdlib import get_stdlib_content
 except ImportError:
@@ -77,6 +85,13 @@ class QasmAnalyzerGUI:
         
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
+        
+        # Tools menu with Controller Mode
+        tools_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Tools", menu=tools_menu)
+        tools_menu.add_command(label="Launch Controller Mode...", 
+                               command=self._launch_controller_mode,
+                               state='normal' if Controller else 'disabled')
     
     def _setup_main_layout(self):
         main_frame = ttk.Frame(self.root, padding="5")
@@ -622,6 +637,276 @@ class QasmAnalyzerGUI:
             return []
         return [line.strip() for line in self.source_code.splitlines()
                 if re.match(r'^\s*include\s+["\']([^"\']+)["\']\s*;', line, re.IGNORECASE)]
+    
+    def _launch_controller_mode(self):
+        """Launch the controller mode to distribute chunks to worker nodes."""
+        if not Controller:
+            messagebox.showerror("Controller Not Available",
+                "Controller module not available. Make sure choreo.controller is properly installed.")
+            return
+        
+        self._show_controller_dialog()
+    
+    def _show_controller_dialog(self):
+        """Show dialog to select chunks directory and workers.json configuration."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Controller Mode - Distribute Chunks to Workers")
+        dialog.geometry("600x650")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Directory selection frame
+        dir_frame = ttk.LabelFrame(dialog, text="Chunks Directory", padding="10")
+        dir_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        dir_var = tk.StringVar()
+        ttk.Entry(dir_frame, textvariable=dir_var, state='readonly', width=60).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        
+        # Browse button will be configured later after defining check_and_display_mismatch
+        browse_dir_button = ttk.Button(dir_frame, text="Browse...")
+        browse_dir_button.pack(side=tk.LEFT)
+        
+        # Workers config file selection frame
+        config_frame = ttk.LabelFrame(dialog, text="Workers Configuration File", padding="10")
+        config_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        config_var = tk.StringVar()
+        
+        # Default to choreo/workers.json
+        default_workers_config = Path(__file__).resolve().parent.parent / "choreo" / "workers.json"
+        if default_workers_config.exists():
+            config_var.set(str(default_workers_config))
+        
+        ttk.Entry(config_frame, textvariable=config_var, state='readonly', width=60).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        
+        # Browse button for config will be configured later
+        browse_config_button = ttk.Button(config_frame, text="Browse...")
+        browse_config_button.pack(side=tk.LEFT)
+        
+        # Warning label for worker/chunk mismatch
+        warning_label = tk.Label(dialog, text="", font=('Arial', 9, 'bold'))
+        warning_label.pack(fill=tk.X, padx=10, pady=5)
+        
+        def check_and_display_mismatch():
+            """Check for worker/chunk mismatch and update warning label."""
+            chunks_dir = dir_var.get()
+            config_file = config_var.get()
+            
+            # Only check if both are selected
+            if not chunks_dir or not config_file:
+                warning_label.config(text="")
+                return
+            
+            # Check chunks directory
+            if not Path(chunks_dir).exists():
+                warning_label.config(text="")
+                return
+            
+            chunks_dir_path = Path(chunks_dir)
+            qasm_files = list(chunks_dir_path.glob('*.qasm'))
+            num_chunks = len(qasm_files)
+            
+            if num_chunks == 0:
+                warning_label.config(text="⚠ No .qasm files found in directory")
+                return
+            
+            # Check workers config
+            if not Path(config_file).exists():
+                warning_label.config(text="")
+                return
+            
+            try:
+                with open(config_file, 'r') as f:
+                    workers = json.load(f)
+                num_workers = len(workers)
+            except Exception as e:
+                warning_label.config(text=f"⚠ Error reading config: {e}")
+                return
+            
+            # Check for mismatch
+            if num_workers != num_chunks:
+                if num_chunks > num_workers:
+                    # Critical: more chunks than workers
+                    warning_label.config(
+                        text=f"🔴 CRITICAL: {num_chunks} chunks but only {num_workers} worker(s). Cannot distribute all chunks!",
+                        foreground="red"
+                    )
+                else:
+                    # Minor: more workers than chunks
+                    warning_label.config(
+                        text=f"⚠ Minor: {num_chunks} chunks but {num_workers} worker(s) configured. Extra workers will be unused.",
+                        foreground="orange"
+                    )
+            else:
+                warning_label.config(text="✓ Configuration OK: Workers and chunks match", foreground="green")
+        
+        # Override select_chunks_dir to call mismatch check
+        def select_chunks_dir_with_check():
+            initial_dir = Path.cwd() / "split-out"
+            directory = filedialog.askdirectory(
+                title="Select directory with QASM chunks",
+                initialdir=str(initial_dir)
+            )
+            if directory:
+                dir_var.set(directory)
+                self.root.after(100, check_and_display_mismatch)
+        
+        # Set command on directory browse button
+        browse_dir_button.config(command=select_chunks_dir_with_check)
+        
+        # Define select_config_file to also check
+        def select_config_file_with_check():
+            initial_dir = Path(__file__).resolve().parent.parent / "choreo"
+            config_file = filedialog.askopenfilename(
+                title="Select workers.json configuration file",
+                initialdir=str(initial_dir),
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+            )
+            if config_file:
+                config_var.set(config_file)
+                self.root.after(100, check_and_display_mismatch)
+        
+        # Set command on config browse button
+        browse_config_button.config(command=select_config_file_with_check)
+        
+        # Initial check with default config
+        self.root.after(100, check_and_display_mismatch)
+        
+        # Workers preview frame
+        preview_frame = ttk.LabelFrame(dialog, text="Workers Configuration Preview", padding="10")
+        preview_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        preview_text = scrolledtext.ScrolledText(preview_frame, height=10, font=('Courier', 9))
+        preview_text.pack(fill=tk.BOTH, expand=True)
+        preview_text.config(state='disabled')
+        
+        def update_preview():
+            preview_text.config(state='normal')
+            preview_text.delete('1.0', tk.END)
+            
+            config_path = config_var.get()
+            if config_path and Path(config_path).exists():
+                try:
+                    with open(config_path, 'r') as f:
+                        workers = json.load(f)
+                    preview_text.insert('1.0', json.dumps(workers, indent=2))
+                except Exception as e:
+                    preview_text.insert('1.0', f"Error reading config: {e}")
+            else:
+                preview_text.insert('1.0', "Please select a valid workers.json file")
+            
+            preview_text.config(state='disabled')
+        
+        # Update preview when config changes
+        def on_config_change(*args):
+            self.root.after(100, update_preview)
+        
+        config_var.trace('w', on_config_change)
+        update_preview()
+        
+        # Button frame
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        def launch_distribution():
+            chunks_dir = dir_var.get()
+            config_file = config_var.get()
+            
+            if not chunks_dir:
+                messagebox.showwarning("Missing Directory", "Please select a chunks directory.")
+                return
+            
+            if not config_file or not Path(config_file).exists():
+                messagebox.showwarning("Missing Config", "Please select a valid workers.json file.")
+                return
+            
+            if not Path(chunks_dir).exists():
+                messagebox.showerror("Invalid Directory", f"Directory not found: {chunks_dir}")
+                return
+            
+            # Check if we have enough workers for the chunks
+            chunks_dir_path = Path(chunks_dir)
+            qasm_files = list(chunks_dir_path.glob('*.qasm'))
+            num_chunks = len(qasm_files)
+            
+            try:
+                with open(config_file, 'r') as f:
+                    workers = json.load(f)
+                num_workers = len(workers)
+            except Exception as e:
+                messagebox.showerror("Config Error", f"Failed to read workers config: {e}")
+                return
+            
+            # Workers must match or exceed the number of chunks
+            if num_chunks > num_workers:
+                # Critical error: not enough workers
+                messagebox.showerror(
+                    "Insufficient Workers",
+                    f"Error: You have {num_chunks} chunks but only {num_workers} worker(s) configured.\n\n"
+                    f"You need at least {num_chunks} workers to distribute all chunks.\n\n"
+                    f"Please provide more workers in your configuration."
+                )
+                return
+            
+            # If we get here, either workers == chunks (perfect) or workers > chunks (minor issue)
+            # Both cases are allowed to proceed
+            
+            dialog.destroy()
+            self._run_controller_distribution(chunks_dir, config_file)
+        
+        ttk.Button(button_frame, text="Launch Distribution", 
+                  command=launch_distribution).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Cancel", 
+                  command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+    
+    def _run_controller_distribution(self, chunks_dir: str, config_file: str):
+        """Run the controller distribution in a separate thread."""
+        def distribute():
+            try:
+                controller = Controller(Path(config_file))
+                
+                # Capture output
+                import io
+                from contextlib import redirect_stdout
+                
+                output_buffer = io.StringIO()
+                with redirect_stdout(output_buffer):
+                    controller.distribute_files(chunks_dir)
+                
+                output = output_buffer.getvalue()
+                
+                # Show results in a new window
+                self.root.after(0, lambda: self._show_distribution_results(output))
+                
+            except Exception as e:
+                error_msg = f"Error during distribution:\n{str(e)}"
+                self.root.after(0, lambda: messagebox.showerror("Distribution Error", error_msg))
+        
+        # Run in background thread
+        thread = Thread(target=distribute, daemon=True)
+        thread.start()
+        
+        # Show progress message
+        self._show_status("Distributing chunks to workers...", blink=False)
+    
+    def _show_distribution_results(self, output: str):
+        """Display the distribution results in a new window."""
+        results_window = tk.Toplevel(self.root)
+        results_window.title("Distribution Results")
+        results_window.geometry("700x500")
+        results_window.transient(self.root)
+        
+        # Results text
+        results_text = scrolledtext.ScrolledText(results_window, wrap=tk.WORD, font=('Courier', 9))
+        results_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        results_text.insert('1.0', output)
+        results_text.config(state='disabled')
+        
+        # Close button
+        ttk.Button(results_window, text="Close", 
+                  command=results_window.destroy).pack(pady=10)
+        
+        self._show_status("Distribution completed!")
     
     def run(self):
         self.root.mainloop()

@@ -132,3 +132,74 @@ Before:
 After:
 - ✅ Line numbers: Perfect 1:1 alignment with code
 - ✅ Menu: 21+ examples sorted alphabetically with descriptive names
+
+---
+
+### 3. ✅ Controller Mode - Distribute Chunks to Worker Nodes
+
+**Purpose**: After saving quantum circuit chunks to a directory, users can now switch to "controller-mode" to distribute the chunks to worker nodes for parallel execution.
+
+**How It Works**:
+1. User selects **Tools → Launch Controller Mode...** from the menu
+2. A dialog appears to:
+   - Select the directory containing QASM chunks (usually `split-out/<circuit-name>/`)
+   - Select a `workers.json` configuration file (defaults to `src/main/python/choreo/workers.json`)
+   - Preview the workers configuration before distribution
+3. User clicks "Launch Distribution"
+4. Chunks are distributed to worker nodes in a background thread
+5. Results window shows success/failure status for each file transfer
+
+**workers.json Format**:
+```json
+{
+    "0": "127.0.0.1:6660",
+    "1": "127.0.0.1:6661",
+    "2": "127.0.0.1:6662"
+}
+```
+Maps worker IDs (0, 1, 2, ...) to their network addresses (hostname:port)
+
+**Key Features**:
+- 🔧 Configurable worker nodes via `workers.json`
+- 🔄 Non-blocking distribution (runs in background thread)
+- 📊 Live results window showing transfer status
+- ⚙️ File browser for easy directory and config selection
+- 👀 Configuration preview before sending files
+- 📝 Detailed output showing which files went to which workers
+- ⚠️ Graceful handling of missing workers or network errors
+
+**Code Changes** (main_window.py):
+```python
+# New imports:
+import json
+from threading import Thread
+from choreo.controller import Controller
+
+# New menu in _setup_menu():
+tools_menu = tk.Menu(menubar, tearoff=0)
+menubar.add_cascade(label="Tools", menu=tools_menu)
+tools_menu.add_command(label="Launch Controller Mode...", 
+                       command=self._launch_controller_mode)
+
+# New methods:
+def _launch_controller_mode(self)
+def _show_controller_dialog(self)
+def _run_controller_distribution(self, chunks_dir, config_file)
+def _show_distribution_results(self, output)
+```
+
+**Example Workflow**:
+1. Load an OpenQASM circuit file
+2. Mark split points at key locations
+3. Click "Analyze & Save Chunks" → saves to `split-out/circuit-name/0.qasm`, `1.qasm`, etc.
+4. Click **Tools → Launch Controller Mode**
+5. Select the circuit directory (e.g., `split-out/circuit-name/`)
+6. Select or verify `workers.json` configuration
+7. Click "Launch Distribution"
+8. Results window shows each file being sent to its assigned worker node
+9. Workers pick up the files and begin execution
+
+**Controller.py Improvements**:
+- Modified `distribute_files()` to raise `ValueError` instead of `sys.exit()` for better GUI integration
+- Allows the controller to be used programmatically without terminating the application
+- Better error handling for missing directories and invalid worker addresses

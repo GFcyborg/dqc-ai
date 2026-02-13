@@ -42,10 +42,12 @@ class Controller:
         
         Args:
             input_dir: Path to directory containing files to distribute
+        
+        Raises:
+            ValueError: If the input directory is not valid
         """
         if not os.path.isdir(input_dir):
-            print(f"Error: Directory '{input_dir}' not found")
-            sys.exit(1)
+            raise ValueError(f"Directory '{input_dir}' not found")
         
         # Get list of .qasm files
         qasm_files = [f for f in os.listdir(input_dir) if f.endswith('.qasm')]
