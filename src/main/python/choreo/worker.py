@@ -2,11 +2,11 @@
 Worker node for receiving and processing quantum circuit files.
 
 Usage (CLI):
-    python -m choreo.worker <port> [--host 0.0.0.0] [--output-dir ./work_output]
+    python -m choreo.worker <port> [--host 0.0.0.0] [--output-dir ./split-received]
 
 Usage (Python):
     from choreo import Worker
-    worker = Worker(port=6660, output_dir="./work_output")
+    worker = Worker(port=6660, output_dir="./split-received")
     worker.start()
 """
 
@@ -31,11 +31,11 @@ class Worker:
         Args:
             port: TCP port to listen on
             host: Host/network interface to bind to (default: 0.0.0.0 for all interfaces)
-            output_dir: Directory to save received files (default: ./work_received/)
+            output_dir: Directory to save received files (default: ./split-received/)
         """
         self.port = port
         self.host = host
-        self.output_dir = output_dir or "./work_received"
+        self.output_dir = output_dir or "./split-received"
         
         # Create output directory if it doesn't exist
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
@@ -119,7 +119,7 @@ def main():
     )
     parser.add_argument("port", type=int, help="TCP port to listen on")
     parser.add_argument("--host", default="0.0.0.0", help="Host/interface to bind to (default: 0.0.0.0)")
-    parser.add_argument("--output-dir", default=None, help="Directory to save received files (default: ./work_received/)")
+    parser.add_argument("--output-dir", default=None, help="Directory to save received files (default: ./split-received/)")
     
     args = parser.parse_args()
     

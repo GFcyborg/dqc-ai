@@ -11,7 +11,9 @@ import re
 from typing import Dict, List, Tuple
 import json
 import sys
+import threading
 from threading import Thread
+import queue
 
 from parser import QasmParser
 from analyzer import VariableAnalyzer
@@ -610,6 +612,16 @@ class QasmAnalyzerGUI:
                 f.write(f"{line}\n")
     
     def _save_chunks_to_files(self, output_dir: Path, base_name: str):
+        # Clean up previous numbered chunks to avoid leftover files
+        if output_dir.exists():
+            for old_chunk in output_dir.glob('*.qasm'):
+                # Only remove numbered chunk files (0.qasm, 1.qasm, etc.)
+                if old_chunk.stem.isdigit():
+                    try:
+                        old_chunk.unlink()
+                    except Exception as e:
+                        print(f"Warning: Could not remove old chunk {old_chunk}: {e}")
+        
         chunks = self.analyzer.analyze(self.source_code, list(self.split_points))
         include_lines = self._get_include_lines_if_replicate()
         
@@ -651,18 +663,22 @@ class QasmAnalyzerGUI:
         """Show dialog to select chunks directory and workers.json configuration."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Controller Mode - Distribute Chunks to Workers")
-        dialog.geometry("600x650")
+        dialog.geometry("600x700")
         dialog.transient(self.root)
         dialog.grab_set()
         
-        # Directory selection frame
-        dir_frame = ttk.LabelFrame(dialog, text="Chunks Directory", padding="10")
+        # Track original config and whether we're using localhost
+        original_config = {}
+        temp_localhost_config = {}
+        using_localhost = False
+        
+        # Step 1: Directory selection frame (user must select first)
+        dir_frame = ttk.LabelFrame(dialog, text="Step 1: Select Chunks Directory", padding="10")
         dir_frame.pack(fill=tk.X, padx=10, pady=10)
         
-        dir_var = tk.StringVar()
+        dir_var = tk.StringVar()  # No default - user must select
         ttk.Entry(dir_frame, textvariable=dir_var, state='readonly', width=60).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
         
-        # Browse button will be configured later after defining check_and_display_mismatch
         browse_dir_button = ttk.Button(dir_frame, text="Browse...")
         browse_dir_button.pack(side=tk.LEFT)
         
@@ -679,83 +695,255 @@ class QasmAnalyzerGUI:
         
         ttk.Entry(config_frame, textvariable=config_var, state='readonly', width=60).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
         
-        # Browse button for config will be configured later
         browse_config_button = ttk.Button(config_frame, text="Browse...")
         browse_config_button.pack(side=tk.LEFT)
         
         # Warning label for worker/chunk mismatch
-        warning_label = tk.Label(dialog, text="", font=('Arial', 9, 'bold'))
+        warning_label = tk.Label(dialog, text="Please select a chunks directory to begin", 
+                               font=('Arial', 9, 'italic'), foreground='gray')
         warning_label.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Step 2: Localhost workers checkbox (initially disabled)
+        localhost_frame = ttk.LabelFrame(dialog, text="Step 2: Localhost Configuration (Optional)", padding="10")
+        localhost_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        use_localhost_var = tk.BooleanVar(value=False)
+        localhost_checkbox = ttk.Checkbutton(
+            localhost_frame, 
+            text="Use localhost as worker nodes (auto-configure ports starting from 6660)",
+            variable=use_localhost_var,
+            state='disabled'  # Initially disabled until directory is selected
+        )
+        localhost_checkbox.pack(anchor=tk.W)
+        
+        # Step 3: Workers preview frame (editable)
+        preview_frame = ttk.LabelFrame(dialog, text="Step 3: Workers Configuration Preview", padding="10")
+        preview_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        preview_text = scrolledtext.ScrolledText(preview_frame, height=10, font=('Courier', 9))
+        preview_text.pack(fill=tk.BOTH, expand=True)
+        
+        def load_original_config():
+            """Load the original workers.json from disk."""
+            nonlocal original_config
+            config_path = config_var.get()
+            if config_path and Path(config_path).exists():
+                try:
+                    with open(config_path, 'r') as f:
+                        original_config = json.load(f)
+                    return original_config
+                except Exception as e:
+                    print(f"Error loading config: {e}")
+                    return {}
+            return {}
+        
+        def update_preview(config_dict=None):
+            """Update preview with given config or load from original."""
+            if config_dict is None:
+                config_dict = load_original_config()
+            
+            # Remember current state
+            current_state = preview_text.cget('state')
+            
+            # Temporarily enable to update content
+            preview_text.config(state='normal')
+            preview_text.delete('1.0', tk.END)
+            if config_dict:
+                preview_text.insert('1.0', json.dumps(config_dict, indent=2))
+            else:
+                preview_text.insert('1.0', "# No configuration loaded\n# Select a chunks directory and enable localhost,\n# or manually edit the configuration below")
+            
+            # Restore previous state
+            preview_text.config(state=current_state)
+        
+        def get_current_preview_config():
+            """Parse and return the current config from the preview text."""
+            try:
+                content = preview_text.get('1.0', tk.END).strip()
+                if content and not content.startswith('#'):
+                    return json.loads(content)
+            except Exception as e:
+                print(f"Error parsing preview config: {e}")
+            return {}
+        
+        def generate_localhost_config():
+            """Generate localhost workers config based on selected chunks directory."""
+            nonlocal temp_localhost_config
+            chunks_dir = dir_var.get()
+            
+            if not chunks_dir:
+                messagebox.showwarning("No Directory", 
+                    "Please select a chunks directory first.")
+                use_localhost_var.set(False)
+                return None
+            
+            chunks_dir_path = Path(chunks_dir)
+            if not chunks_dir_path.exists() or not chunks_dir_path.is_dir():
+                messagebox.showwarning("Invalid Directory", 
+                    f"The selected path is not a valid directory:\n{chunks_dir}")
+                use_localhost_var.set(False)
+                return None
+            
+            # Count numbered chunk files
+            qasm_files = [f for f in chunks_dir_path.glob('*.qasm') if f.stem.isdigit()]
+            
+            if qasm_files:
+                chunk_numbers = [int(f.stem) for f in qasm_files]
+                num_chunks = max(chunk_numbers) + 1
+            else:
+                num_chunks = 0
+            
+            if num_chunks == 0:
+                all_qasm = list(chunks_dir_path.glob('*.qasm'))
+                if len(all_qasm) == 0:
+                    error_msg = f"No .qasm files found in:\n{chunks_dir}"
+                else:
+                    error_msg = f"Found {len(all_qasm)} .qasm file(s), but none are numbered chunks:\n"
+                    for f in all_qasm[:10]:
+                        error_msg += f"  • {f.name}\n"
+                    error_msg += f"\nNumbered chunks must be named: 0.qasm, 1.qasm, 2.qasm, etc."
+                
+                messagebox.showwarning("No Numbered Chunks", error_msg)
+                use_localhost_var.set(False)
+                return None
+            
+            # Generate localhost workers
+            workers = {}
+            base_port = 6660
+            for i in range(num_chunks):
+                workers[str(i)] = f"127.0.0.1:{base_port + i}"
+            
+            temp_localhost_config = workers
+            return workers
+        
+        def on_localhost_toggle():
+            """Handle localhost checkbox toggle."""
+            nonlocal using_localhost
+            
+            if use_localhost_var.get():
+                # Generate and show localhost config
+                config = generate_localhost_config()
+                if config:
+                    using_localhost = True
+                    update_preview(config)
+                    
+                    # Make preview non-editable and grayed out
+                    preview_text.config(state='disabled', bg='#e0e0e0')
+                    
+                    warning_label.config(
+                        text=f"✓ Generated {len(config)} localhost workers (configuration locked)",
+                        foreground='green',
+                        font=('Arial', 9, 'bold')
+                    )
+                else:
+                    using_localhost = False
+            else:
+                # Revert to original config
+                using_localhost = False
+                update_preview(original_config if original_config else None)
+                
+                # Make preview editable again
+                preview_text.config(state='normal', bg='white')
+                
+                warning_label.config(
+                    text="Using configuration from file (editable)",
+                    foreground='gray',
+                    font=('Arial', 9, 'italic')
+                )
+        
+        use_localhost_var.trace('w', lambda *args: on_localhost_toggle())
         
         def check_and_display_mismatch():
             """Check for worker/chunk mismatch and update warning label."""
             chunks_dir = dir_var.get()
-            config_file = config_var.get()
             
-            # Only check if both are selected
-            if not chunks_dir or not config_file:
-                warning_label.config(text="")
-                return
-            
-            # Check chunks directory
-            if not Path(chunks_dir).exists():
-                warning_label.config(text="")
+            if not chunks_dir:
+                warning_label.config(
+                    text="Please select a chunks directory to begin",
+                    foreground='gray',
+                    font=('Arial', 9, 'italic')
+                )
                 return
             
             chunks_dir_path = Path(chunks_dir)
-            qasm_files = list(chunks_dir_path.glob('*.qasm'))
-            num_chunks = len(qasm_files)
+            if not chunks_dir_path.exists():
+                warning_label.config(text="⚠ Directory not found", foreground='orange', font=('Arial', 9, 'bold'))
+                return
+            
+            # Count only numbered chunk files
+            qasm_files = [f for f in chunks_dir_path.glob('*.qasm') if f.stem.isdigit()]
+            
+            if qasm_files:
+                chunk_numbers = [int(f.stem) for f in qasm_files]
+                num_chunks = max(chunk_numbers) + 1
+            else:
+                num_chunks = 0
             
             if num_chunks == 0:
-                warning_label.config(text="⚠ No .qasm files found in directory")
+                warning_label.config(
+                    text="⚠ No numbered chunk files found in directory",
+                    foreground='orange',
+                    font=('Arial', 9, 'bold')
+                )
                 return
             
-            # Check workers config
-            if not Path(config_file).exists():
-                warning_label.config(text="")
-                return
-            
-            try:
-                with open(config_file, 'r') as f:
-                    workers = json.load(f)
-                num_workers = len(workers)
-            except Exception as e:
-                warning_label.config(text=f"⚠ Error reading config: {e}")
-                return
+            # Get current workers config from preview (which may be edited)
+            current_config = get_current_preview_config()
+            num_workers = len(current_config) if current_config else 0
             
             # Check for mismatch
-            if num_workers != num_chunks:
+            if num_workers == 0:
+                warning_label.config(
+                    text=f"Found {num_chunks} chunks - configure workers",
+                    foreground='blue',
+                    font=('Arial', 9, 'bold')
+                )
+            elif num_workers != num_chunks:
                 if num_chunks > num_workers:
-                    # Critical: more chunks than workers
                     warning_label.config(
-                        text=f"🔴 CRITICAL: {num_chunks} chunks but only {num_workers} worker(s). Cannot distribute all chunks!",
-                        foreground="red"
+                        text=f"🔴 CRITICAL: {num_chunks} chunks but only {num_workers} worker(s)",
+                        foreground="red",
+                        font=('Arial', 9, 'bold')
                     )
                 else:
-                    # Minor: more workers than chunks
                     warning_label.config(
-                        text=f"⚠ Minor: {num_chunks} chunks but {num_workers} worker(s) configured. Extra workers will be unused.",
-                        foreground="orange"
+                        text=f"⚠ {num_chunks} chunks, {num_workers} workers (extra workers unused)",
+                        foreground="orange",
+                        font=('Arial', 9, 'bold')
                     )
             else:
-                warning_label.config(text="✓ Configuration OK: Workers and chunks match", foreground="green")
+                warning_label.config(
+                    text=f"✓ Configuration OK: {num_workers} workers for {num_chunks} chunks",
+                    foreground="green",
+                    font=('Arial', 9, 'bold')
+                )
         
-        # Override select_chunks_dir to call mismatch check
+        def on_directory_selected():
+            """Called when a directory is selected - enables localhost checkbox and loads config."""
+            # Enable localhost checkbox now that directory is selected
+            localhost_checkbox.config(state='normal')
+            
+            # Load original config into preview
+            update_preview()
+            
+            # Check for mismatches
+            check_and_display_mismatch()
+        
         def select_chunks_dir_with_check():
+            """Browse for chunks directory."""
             initial_dir = Path.cwd() / "split-out"
             directory = filedialog.askdirectory(
                 title="Select directory with QASM chunks",
-                initialdir=str(initial_dir)
+                initialdir=str(initial_dir) if initial_dir.exists() else None
             )
             if directory:
                 dir_var.set(directory)
-                self.root.after(100, check_and_display_mismatch)
+                on_directory_selected()
         
-        # Set command on directory browse button
         browse_dir_button.config(command=select_chunks_dir_with_check)
         
-        # Define select_config_file to also check
         def select_config_file_with_check():
+            """Browse for workers.json file."""
             initial_dir = Path(__file__).resolve().parent.parent / "choreo"
             config_file = filedialog.askopenfilename(
                 title="Select workers.json configuration file",
@@ -764,100 +952,364 @@ class QasmAnalyzerGUI:
             )
             if config_file:
                 config_var.set(config_file)
-                self.root.after(100, check_and_display_mismatch)
+                if dir_var.get():  # Only update if directory already selected
+                    update_preview()
+                    check_and_display_mismatch()
         
-        # Set command on config browse button
         browse_config_button.config(command=select_config_file_with_check)
         
-        # Initial check with default config
-        self.root.after(100, check_and_display_mismatch)
-        
-        # Workers preview frame
-        preview_frame = ttk.LabelFrame(dialog, text="Workers Configuration Preview", padding="10")
-        preview_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        preview_text = scrolledtext.ScrolledText(preview_frame, height=10, font=('Courier', 9))
-        preview_text.pack(fill=tk.BOTH, expand=True)
-        preview_text.config(state='disabled')
-        
-        def update_preview():
-            preview_text.config(state='normal')
-            preview_text.delete('1.0', tk.END)
-            
-            config_path = config_var.get()
-            if config_path and Path(config_path).exists():
-                try:
-                    with open(config_path, 'r') as f:
-                        workers = json.load(f)
-                    preview_text.insert('1.0', json.dumps(workers, indent=2))
-                except Exception as e:
-                    preview_text.insert('1.0', f"Error reading config: {e}")
-            else:
-                preview_text.insert('1.0', "Please select a valid workers.json file")
-            
-            preview_text.config(state='disabled')
-        
-        # Update preview when config changes
-        def on_config_change(*args):
-            self.root.after(100, update_preview)
-        
-        config_var.trace('w', on_config_change)
+        # Initialize preview with current config (if it exists)
         update_preview()
         
-        # Button frame
+        # Button frame with Launch and Cancel
         button_frame = ttk.Frame(dialog)
         button_frame.pack(fill=tk.X, padx=10, pady=10)
         
-        def launch_distribution():
+        def save_and_launch_distribution():
+            """Save the current configuration and launch distribution."""
             chunks_dir = dir_var.get()
             config_file = config_var.get()
             
+            # Step 1: Validate chunks directory
             if not chunks_dir:
-                messagebox.showwarning("Missing Directory", "Please select a chunks directory.")
-                return
-            
-            if not config_file or not Path(config_file).exists():
-                messagebox.showwarning("Missing Config", "Please select a valid workers.json file.")
+                messagebox.showwarning("No Directory", "Please select a chunks directory first.")
                 return
             
             if not Path(chunks_dir).exists():
                 messagebox.showerror("Invalid Directory", f"Directory not found: {chunks_dir}")
                 return
             
-            # Check if we have enough workers for the chunks
-            chunks_dir_path = Path(chunks_dir)
-            qasm_files = list(chunks_dir_path.glob('*.qasm'))
-            num_chunks = len(qasm_files)
-            
-            try:
-                with open(config_file, 'r') as f:
-                    workers = json.load(f)
-                num_workers = len(workers)
-            except Exception as e:
-                messagebox.showerror("Config Error", f"Failed to read workers config: {e}")
+            # Step 2: Validate config file path
+            if not config_file:
+                messagebox.showwarning("No Config File", "Please specify a workers.json file location.")
                 return
             
-            # Workers must match or exceed the number of chunks
+            # Step 3: Get current configuration from preview (which may have been edited)
+            current_config = get_current_preview_config()
+            
+            if not current_config:
+                messagebox.showwarning("No Workers", 
+                    "No workers configuration found.\n\n"
+                    "Please enable localhost configuration or manually edit the preview.")
+                return
+            
+            # Step 4: Validate we have enough workers
+            chunks_dir_path = Path(chunks_dir)
+            qasm_files = [f for f in chunks_dir_path.glob('*.qasm') if f.stem.isdigit()]
+            
+            if qasm_files:
+                chunk_numbers = [int(f.stem) for f in qasm_files]
+                num_chunks = max(chunk_numbers) + 1
+            else:
+                num_chunks = 0
+            
+            num_workers = len(current_config)
+            
             if num_chunks > num_workers:
-                # Critical error: not enough workers
                 messagebox.showerror(
                     "Insufficient Workers",
-                    f"Error: You have {num_chunks} chunks but only {num_workers} worker(s) configured.\n\n"
-                    f"You need at least {num_chunks} workers to distribute all chunks.\n\n"
-                    f"Please provide more workers in your configuration."
+                    f"Error: You have {num_chunks} chunks but only {num_workers} worker(s).\n\n"
+                    f"You need at least {num_chunks} workers to distribute all chunks."
                 )
                 return
             
-            # If we get here, either workers == chunks (perfect) or workers > chunks (minor issue)
-            # Both cases are allowed to proceed
+            # Step 5: Confirm workers are running (if not using localhost)
+            if not using_localhost:
+                confirm = messagebox.askyesno(
+                    "Confirm Workers Running",
+                    f"⚠ Important: Make sure all {num_workers} worker(s) are running on their respective hosts!\n\n"
+                    f"Workers should be listening on ports {', '.join(addr.split(':')[1] if ':' in addr else addr for addr in sorted(current_config.values())[:5])}{'...' if len(current_config) > 5 else ''}\n\n"
+                    f"Click 'Yes' if workers are running and ready.\n"
+                    f"Click 'No' to cancel and start workers first.",
+                    icon='warning'
+                )
+                
+                if not confirm:
+                    return
             
+            # Step 6: Save the configuration to disk
+            try:
+                with open(config_file, 'w') as f:
+                    json.dump(current_config, f, indent=4)
+                print(f"Saved workers configuration to: {config_file}")
+            except Exception as e:
+                messagebox.showerror("Save Error", f"Failed to save configuration:\n{e}")
+                return
+            
+            # Step 7: Close dialog and launch distribution dialog
             dialog.destroy()
-            self._run_controller_distribution(chunks_dir, config_file)
+            self._show_distribution_dialog(chunks_dir, config_file, current_config, using_localhost)
         
         ttk.Button(button_frame, text="Launch Distribution", 
-                  command=launch_distribution).pack(side=tk.RIGHT, padx=5)
+                  command=save_and_launch_distribution).pack(side=tk.RIGHT, padx=5)
         ttk.Button(button_frame, text="Cancel", 
                   command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+    
+    def _show_distribution_dialog(self, chunks_dir: str, config_file: str, worker_config: dict, localhost_mode: bool):
+        """Show distribution dialog with integrated worker management and controller."""
+        dist_dialog = tk.Toplevel(self.root)
+        dist_dialog.title("Distribution - Controller & Workers")
+        dist_dialog.geometry("900x700")
+        dist_dialog.transient(self.root)
+        dist_dialog.grab_set()
+        
+        # Track worker processes and threads
+        worker_processes = {}
+        worker_threads = {}
+        worker_running = {}
+        
+        # Create main paned window (horizontal split)
+        main_paned = ttk.PanedWindow(dist_dialog, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Left panel: Workers (only if localhost mode)
+        if localhost_mode:
+            workers_frame = ttk.LabelFrame(main_paned, text="Local Workers", padding="5")
+            main_paned.add(workers_frame, weight=1)
+            
+            worker_notebook = ttk.Notebook(workers_frame)
+            worker_notebook.pack(fill=tk.BOTH, expand=True)
+            
+            # Create a tab for each worker
+            worker_tabs = {}
+            worker_outputs = {}
+            worker_buttons = {}
+            
+            for worker_id in sorted(worker_config.keys(), key=lambda x: int(x)):
+                address = worker_config[worker_id]
+                if ':' not in address:
+                    continue
+                    
+                host, port = address.rsplit(':', 1)
+                port = int(port)
+                
+                # Only show localhost workers
+                if host not in ('127.0.0.1', 'localhost'):
+                    continue
+                
+                # Create tab for this worker
+                tab_frame = ttk.Frame(worker_notebook)
+                worker_notebook.add(tab_frame, text=f"Worker {worker_id} (:{port})")
+                worker_tabs[worker_id] = tab_frame
+                
+                # Control buttons
+                control_frame = ttk.Frame(tab_frame)
+                control_frame.pack(fill=tk.X, padx=5, pady=5)
+                
+                start_btn = ttk.Button(control_frame, text="▶ Start", 
+                                      command=lambda wid=worker_id, p=port: self._start_worker(wid, p, worker_outputs, worker_running, worker_threads, worker_buttons))
+                start_btn.pack(side=tk.LEFT, padx=2)
+                
+                stop_btn = ttk.Button(control_frame, text="⏹ Stop", state='disabled',
+                                     command=lambda wid=worker_id: self._stop_worker(wid, worker_running, worker_threads, worker_buttons))
+                stop_btn.pack(side=tk.LEFT, padx=2)
+                
+                worker_buttons[worker_id] = {'start': start_btn, 'stop': stop_btn}
+                worker_running[worker_id] = False
+                
+                # Output text area
+                output_text = scrolledtext.ScrolledText(tab_frame, height=20, font=('Courier', 9), 
+                                                       bg='#1e1e1e', fg='#d4d4d4', insertbackground='white')
+                output_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+                output_text.insert('1.0', f"Worker {worker_id} on port {port}\nReady to start...\n")
+                worker_outputs[worker_id] = output_text
+        else:
+            # No localhost mode - show message
+            workers_frame = ttk.LabelFrame(main_paned, text="Workers (Disabled)", padding="5")
+            main_paned.add(workers_frame, weight=1)
+            
+            msg_label = ttk.Label(workers_frame, 
+                                 text="Worker management disabled.\n\n"
+                                      "Workers must be started manually on their respective hosts.\n\n"
+                                      "Use: python -m choreo.worker <port>",
+                                 justify=tk.CENTER)
+            msg_label.pack(expand=True)
+        
+        # Right panel: Controller
+        controller_frame = ttk.LabelFrame(main_paned, text="Controller", padding="5")
+        main_paned.add(controller_frame, weight=1)
+        
+        # Controller controls
+        ctrl_control_frame = ttk.Frame(controller_frame)
+        ctrl_control_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        distribute_btn = ttk.Button(ctrl_control_frame, text="📤 Distribute Chunks",
+                                   command=lambda: self._distribute_chunks(chunks_dir, config_file, controller_output))
+        distribute_btn.pack(side=tk.LEFT, padx=5)
+        
+        clear_btn = ttk.Button(ctrl_control_frame, text="Clear Output",
+                              command=lambda: controller_output.delete('1.0', tk.END))
+        clear_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Controller output
+        controller_output = scrolledtext.ScrolledText(controller_frame, height=20, font=('Courier', 9),
+                                                     bg='#1e1e1e', fg='#d4d4d4', insertbackground='white')
+        controller_output.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        controller_output.insert('1.0', f"Controller ready to distribute chunks from:\n{chunks_dir}\n\n"
+                                       f"Using configuration: {config_file}\n"
+                                       f"Workers: {len(worker_config)}\n\n"
+                                       f"Click 'Distribute Chunks' to send files to workers.\n\n")
+        
+        # Bottom button frame
+        bottom_frame = ttk.Frame(dist_dialog)
+        bottom_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        def on_close():
+            """Clean up and close dialog."""
+            # Stop all running workers
+            if localhost_mode:
+                for worker_id in list(worker_running.keys()):
+                    if worker_running.get(worker_id, False):
+                        self._stop_worker(worker_id, worker_running, worker_threads, worker_buttons)
+            dist_dialog.destroy()
+        
+        ttk.Button(bottom_frame, text="Close", command=on_close).pack(side=tk.RIGHT, padx=5)
+        
+        # Handle window close button
+        dist_dialog.protocol("WM_DELETE_WINDOW", on_close)
+    
+    def _start_worker(self, worker_id: str, port: int, worker_outputs: dict, 
+                     worker_running: dict, worker_threads: dict, worker_buttons: dict):
+        """Start a worker process in a thread."""
+        from choreo.worker import Worker
+        import queue
+        
+        if worker_running.get(worker_id, False):
+            return
+        
+        output_widget = worker_outputs[worker_id]
+        output_widget.insert(tk.END, f"\n[{self._timestamp()}] Starting worker on port {port}...\n")
+        output_widget.see(tk.END)
+        
+        # Create output directory
+        output_dir = Path.cwd() / "split-received"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Message queue for thread-safe output
+        output_queue = queue.Queue()
+        
+        def worker_thread():
+            """Worker thread function."""
+            try:
+                # Redirect stdout to capture worker output
+                import sys
+                from io import StringIO
+                
+                # Custom writer that puts messages in queue
+                class QueueWriter:
+                    def write(self, msg):
+                        if msg.strip():
+                            output_queue.put(msg)
+                    def flush(self):
+                        pass
+                
+                old_stdout = sys.stdout
+                sys.stdout = QueueWriter()
+                
+                worker = Worker(port=port, host="127.0.0.1", output_dir=str(output_dir))
+                worker_running[worker_id] = True
+                worker_threads[worker_id] = {'worker': worker, 'queue': output_queue}
+                
+                output_queue.put(f"Worker listening on 127.0.0.1:{port}\n")
+                output_queue.put(f"Output directory: {output_dir}\n")
+                output_queue.put("Waiting for files...\n")
+                
+                worker.start()
+                
+            except Exception as e:
+                output_queue.put(f"Error: {e}\n")
+            finally:
+                sys.stdout = old_stdout
+                worker_running[worker_id] = False
+                output_queue.put(f"Worker stopped.\n")
+        
+        # Start worker thread
+        thread = threading.Thread(target=worker_thread, daemon=True)
+        thread.start()
+        
+        # Update UI
+        worker_buttons[worker_id]['start'].config(state='disabled')
+        worker_buttons[worker_id]['stop'].config(state='normal')
+        
+        # Start output poller
+        def poll_output():
+            """Poll the output queue and update the text widget."""
+            try:
+                while True:
+                    msg = output_queue.get_nowait()
+                    output_widget.insert(tk.END, msg)
+                    output_widget.see(tk.END)
+            except:
+                pass
+            
+            # Schedule next poll if worker is still running
+            if worker_running.get(worker_id, False):
+                self.root.after(100, poll_output)
+        
+        self.root.after(100, poll_output)
+    
+    def _stop_worker(self, worker_id: str, worker_running: dict, worker_threads: dict, worker_buttons: dict):
+        """Stop a worker process."""
+        if not worker_running.get(worker_id, False):
+            return
+        
+        worker_data = worker_threads.get(worker_id)
+        if worker_data and 'worker' in worker_data:
+            worker = worker_data['worker']
+            worker.stop()
+        
+        worker_running[worker_id] = False
+        
+        # Update UI
+        worker_buttons[worker_id]['start'].config(state='normal')
+        worker_buttons[worker_id]['stop'].config(state='disabled')
+    
+    def _distribute_chunks(self, chunks_dir: str, config_file: str, output_widget: scrolledtext.ScrolledText):
+        """Distribute chunks using the controller."""
+        output_widget.insert(tk.END, f"\n{'='*60}\n")
+        output_widget.insert(tk.END, f"[{self._timestamp()}] Starting distribution...\n")
+        output_widget.insert(tk.END, f"{'='*60}\n")
+        output_widget.see(tk.END)
+        
+        def distribute():
+            """Run distribution in separate thread."""
+            try:
+                controller = Controller(Path(config_file))
+                
+                # Capture output
+                import sys
+                from io import StringIO
+                
+                old_stdout = sys.stdout
+                output_buffer = StringIO()
+                sys.stdout = output_buffer
+                
+                controller.distribute_files(chunks_dir)
+                
+                sys.stdout = old_stdout
+                output = output_buffer.getvalue()
+                
+                # Update output widget
+                self.root.after(0, lambda: self._append_controller_output(output_widget, output))
+                
+            except Exception as e:
+                self.root.after(0, lambda: self._append_controller_output(
+                    output_widget, f"Error during distribution:\n{str(e)}\n"))
+        
+        # Run in background thread
+        thread = Thread(target=distribute, daemon=True)
+        thread.start()
+    
+    def _append_controller_output(self, output_widget: scrolledtext.ScrolledText, text: str):
+        """Append text to controller output widget."""
+        output_widget.insert(tk.END, text)
+        output_widget.insert(tk.END, f"\n[{self._timestamp()}] Distribution completed.\n")
+        output_widget.see(tk.END)
+    
+    def _timestamp(self) -> str:
+        """Get current timestamp string."""
+        from datetime import datetime
+        return datetime.now().strftime("%H:%M:%S")
     
     def _run_controller_distribution(self, chunks_dir: str, config_file: str):
         """Run the controller distribution in a separate thread."""
