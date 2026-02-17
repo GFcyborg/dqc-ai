@@ -18,7 +18,7 @@ Example workers.json:
 
 ## Distribute
 
-1. **Launch Controller Mode**: `Tools → Launch Controller Mode...`
+1. **Launch Controller Mode**: `Tools → Controller Mode...`
 2. **Select chunks directory**: `split-out/<circuit-name>/`
 3. **Verify config**: See workers in "Workers Configuration Preview"
 4. **Launch Distribution**: Click "Launch Distribution"
@@ -33,7 +33,7 @@ Example workers.json:
 3. Analyze & Save Chunks
    # Creates: split-out/teleport/0.qasm, 1.qasm, 2.qasm
 
-4. Tools → Launch Controller Mode
+4. Tools → Controller Mode
 5. Directory: split-out/teleport/
 6. Config: src/main/python/choreo/workers.json
 7. Launch Distribution

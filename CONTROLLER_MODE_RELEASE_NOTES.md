@@ -6,7 +6,7 @@ Added **Controller Mode** to distribute saved quantum circuit chunks to worker n
 
 ### New Features
 
-✅ **Distribute Chunks** - `Tools → Launch Controller Mode...`
+✅ **Distribute Chunks** - `Tools → Controller Mode...`
 ✅ **Worker Configuration** - Support for custom `workers.json` files
 ✅ **Configuration Preview** - See workers before distributing
 ✅ **Background Distribution** - Non-blocking file transfers
@@ -16,7 +16,7 @@ Added **Controller Mode** to distribute saved quantum circuit chunks to worker n
 
 1. **Save chunks** → `✓ Analyze & Save Chunks` (creates `split-out/<circuit-name>/`)
 2. **Configure workers** → Edit `src/main/python/choreo/workers.json`
-3. **Distribute** → `Tools → Launch Controller Mode...`
+3. **Distribute** → `Tools → Controller Mode...`
 4. **Select directory** → Choose `split-out/<circuit-name>/`
 5. **Launch** → Files sent to workers in background
 
@@ -29,7 +29,7 @@ Click lines 8, 13 (mark splits)
 Analyze & Save Chunks
 # Creates: split-out/teleport/0.qasm, 1.qasm, 2.qasm
 
-Tools → Launch Controller Mode
+Tools → Controller Mode
 Select: split-out/teleport/
 Verify: workers.json shows 3 workers
 Launch Distribution

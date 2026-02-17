@@ -16,7 +16,7 @@ import argparse
 import os
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 from .protocol import FileTransferProtocol
 
@@ -24,7 +24,13 @@ from .protocol import FileTransferProtocol
 class Worker:
     """Receives and processes quantum circuit files from controller."""
     
-    def __init__(self, port: int, host: str = "0.0.0.0", output_dir: Optional[str] = None):
+    def __init__(
+        self,
+        port: int,
+        host: str = "0.0.0.0",
+        output_dir: Optional[str] = None,
+        output_callback: Optional[Callable[[str], None]] = None,
+    ):
         """
         Initialize worker node.
         
@@ -40,8 +46,17 @@ class Worker:
         # Create output directory if it doesn't exist
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         
+        self.output_callback = output_callback
         self.running = False
         self.server_socket = None
+
+    def _emit(self, message: str) -> None:
+        if not message.endswith("\n"):
+            message = message + "\n"
+        if self.output_callback:
+            self.output_callback(message)
+        else:
+            print(message, end="")
     
     def start(self) -> None:
         """Start the worker server."""
@@ -52,9 +67,9 @@ class Worker:
             self.server_socket.listen(5)
             self.running = True
             
-            print(f"Worker listening on {self.host}:{self.port}")
-            print(f"Output directory: {os.path.abspath(self.output_dir)}")
-            print("Waiting for files from controller...\n")
+            self._emit(f"Worker listening on {self.host}:{self.port}")
+            self._emit(f"Output directory: {os.path.abspath(self.output_dir)}")
+            self._emit("Waiting for files from controller...")
             
             while self.running:
                 try:
@@ -71,11 +86,11 @@ class Worker:
                     break
                 except Exception as e:
                     if self.running:
-                        print(f"Error accepting connection: {e}")
+                        self._emit(f"Error accepting connection: {e}")
         
         except OSError as e:
-            print(f"Error: Cannot bind to {self.host}:{self.port}")
-            print(f"Details: {e}")
+            self._emit(f"Error: Cannot bind to {self.host}:{self.port}")
+            self._emit(f"Details: {e}")
             sys.exit(1)
         
         finally:
@@ -95,12 +110,14 @@ class Worker:
             if success and output_path:
                 file_size = os.path.getsize(output_path)
                 file_name = os.path.basename(output_path)
-                print(f"[{client_addr[0]}:{client_addr[1]}] ✓ Received '{file_name}' ({file_size} bytes)")
+                self._emit(
+                    f"[{client_addr[0]}:{client_addr[1]}] ✓ File '{file_name}' received successfully ({file_size} bytes)"
+                )
             else:
-                print(f"[{client_addr[0]}:{client_addr[1]}] ✗ Failed to receive file")
+                self._emit(f"[{client_addr[0]}:{client_addr[1]}] ✗ Failed to receive file")
         
         except Exception as e:
-            print(f"[{client_addr[0]}:{client_addr[1]}] Error: {e}")
+            self._emit(f"[{client_addr[0]}:{client_addr[1]}] Error: {e}")
         
         finally:
             client_socket.close()
@@ -110,7 +127,7 @@ class Worker:
         self.running = False
         if self.server_socket:
             self.server_socket.close()
-        print("\nWorker stopped")
+        self._emit("Worker stopped")
 
 
 def main():

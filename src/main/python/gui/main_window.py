@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import requests
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import json
 import sys
 import threading
@@ -62,8 +62,11 @@ class QasmAnalyzerGUI:
         try:
             self.parser = QasmParser()
         except RuntimeError as e:
-            messagebox.showerror("Parser Not Available",
-                f"{e}\n\nYou can still use the variable analyzer without AST display.")
+            self._show_messagebox(
+                messagebox.showerror,
+                "Parser Not Available",
+                f"{e}\n\nYou can still use the variable analyzer without AST display."
+            )
         
         self._setup_ui()
     
@@ -91,7 +94,7 @@ class QasmAnalyzerGUI:
         # Tools menu with Controller Mode
         tools_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Launch Controller Mode...", 
+        tools_menu.add_command(label="Controller Mode...", 
                                command=self._launch_controller_mode,
                                state='normal' if Controller else 'disabled')
     
@@ -253,6 +256,27 @@ class QasmAnalyzerGUI:
             self.root.after_cancel(self._status_timers['toggle'])
             self._status_timers['toggle'] = None
         self.status_label.config(text=self._status_message, foreground='gray')
+
+    def _focus_window(self, window: tk.Misc, keep_on_top: bool = False) -> None:
+        try:
+            was_topmost = window.attributes('-topmost')
+        except Exception:
+            was_topmost = None
+
+        try:
+            window.lift()
+            window.focus_force()
+            window.attributes('-topmost', True)
+            if not keep_on_top and not was_topmost:
+                window.after(200, lambda: window.attributes('-topmost', False))
+        except Exception:
+            # Best-effort focus; ignore if not supported in current environment
+            pass
+
+    def _show_messagebox(self, func, title: str, message: str, parent: Optional[tk.Misc] = None, **kwargs):
+        dialog_parent = parent or self.root
+        self._focus_window(dialog_parent)
+        return func(title, message, parent=dialog_parent, **kwargs)
 
     def _is_split_point_allowed(self, line_num: int) -> bool:
         source_lines = self.source_text.get('1.0', tk.END).splitlines()
@@ -425,7 +449,7 @@ class QasmAnalyzerGUI:
             self._add_include_tabs(split_out_dir)
             self._show_status(f"Loaded: {name}")
         except Exception as e:
-            messagebox.showerror("Download Error", f"Failed to download file:\n{e}")
+            self._show_messagebox(messagebox.showerror, "Download Error", f"Failed to download file:\n{e}")
             self._show_status("Error")
     
     @staticmethod
@@ -463,7 +487,7 @@ class QasmAnalyzerGUI:
             
             self._show_status(f"Loaded: {path.name}")
         except Exception as e:
-            messagebox.showerror("File Error", f"Failed to load file:\n{e}")
+            self._show_messagebox(messagebox.showerror, "File Error", f"Failed to load file:\n{e}")
             self._show_status("Error")
     
     def _display_code(self):
@@ -551,11 +575,11 @@ class QasmAnalyzerGUI:
     
     def _save_chunks(self):
         if not self.split_points:
-            messagebox.showwarning("No Split Points", "Please mark at least one split point.")
+            self._show_messagebox(messagebox.showwarning, "No Split Points", "Please mark at least one split point.")
             return
         
         if not self.current_file:
-            messagebox.showwarning("No File", "Please load a file first.")
+            self._show_messagebox(messagebox.showwarning, "No File", "Please load a file first.")
             return
         
         base_name, original_filename = self._get_filenames()
@@ -566,7 +590,7 @@ class QasmAnalyzerGUI:
             split_out_root.mkdir(parents=True, exist_ok=True)
             output_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to create output directory:\n{e}")
+            self._show_messagebox(messagebox.showerror, "Error", f"Failed to create output directory:\n{e}")
             return
         
         try:
@@ -575,10 +599,10 @@ class QasmAnalyzerGUI:
             self._save_chunks_to_files(output_dir, base_name)
             
             chunks_count = len(self.analyzer.analyze(self.source_code, list(self.split_points)))
-            messagebox.showinfo("Success", f"Saved {chunks_count} chunks to:\n{output_dir}")
+            self._show_messagebox(messagebox.showinfo, "Success", f"Saved {chunks_count} chunks to:\n{output_dir}")
             self._show_status(f"Saved {chunks_count} chunks to {output_dir}")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save chunks:\n{e}")
+            self._show_messagebox(messagebox.showerror, "Error", f"Failed to save chunks:\n{e}")
     
     def _get_filenames(self) -> Tuple[str, str]:
         path = Path(self.current_file)
@@ -653,11 +677,165 @@ class QasmAnalyzerGUI:
     def _launch_controller_mode(self):
         """Launch the controller mode to distribute chunks to worker nodes."""
         if not Controller:
-            messagebox.showerror("Controller Not Available",
-                "Controller module not available. Make sure choreo.controller is properly installed.")
+            self._show_messagebox(
+                messagebox.showerror,
+                "Controller Not Available",
+                "Controller module not available. Make sure choreo.controller is properly installed."
+            )
             return
         
         self._show_controller_dialog()
+    
+    def _custom_ask_directory(self, title="Select a Directory", initialdir=None):
+        """Custom directory selection dialog with single-click selection."""
+        selected_dir = [None]  # Use list to allow modification in nested functions
+        
+        # Create a top-level window for directory selection
+        dir_dialog = tk.Toplevel(self.root)
+        dir_dialog.title(title)
+        dir_dialog.geometry("700x600")
+        
+        # Make dialog modal and always on top
+        dir_dialog.transient(self.root)
+        dir_dialog.grab_set()
+        dir_dialog.attributes('-topmost', True)
+        self._focus_window(dir_dialog, keep_on_top=True)
+        
+        # Start from initial directory
+        if initialdir is None:
+            current_path = Path.cwd()
+        else:
+            current_path = Path(initialdir) if isinstance(initialdir, str) else initialdir
+        
+        # Current path label - right-aligned to show trailing path
+        path_var = tk.StringVar(value=str(current_path))
+        path_frame = ttk.Frame(dir_dialog)
+        path_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(path_frame, text="Current Path:").pack(side=tk.LEFT)
+        path_label = ttk.Label(path_frame, textvariable=path_var, relief=tk.SUNKEN, wraplength=400, justify=tk.RIGHT)
+        path_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        
+        # Treeview for directory structure
+        tree_frame = ttk.Frame(dir_dialog)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(tree_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        tree = ttk.Treeview(tree_frame, yscrollcommand=scrollbar.set, height=20)
+        scrollbar.config(command=tree.yview)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Define columns
+        tree.column("#0", width=600)
+        tree.heading("#0", text="Directories")
+        
+        # Store path info for each item
+        item_paths = {}
+        
+        def populate_tree(parent_item, parent_path):
+            """Recursively populate tree with subdirectories."""
+            try:
+                # Get directories in current path
+                dirs = sorted([d for d in parent_path.iterdir() if d.is_dir()])
+                
+                for dir_path in dirs:
+                    # Skip hidden directories
+                    if dir_path.name.startswith('.'):
+                        continue
+                    
+                    item_id = tree.insert(parent_item, "end", text=dir_path.name, open=False)
+                    item_paths[item_id] = dir_path
+                    
+                    # Add a dummy child to show expand arrow
+                    tree.insert(item_id, "end", text="loading...", open=False)
+            except PermissionError:
+                pass
+        
+        def on_tree_expand(event):
+            """Handle tree expansion to load subdirectories on demand."""
+            item = tree.selection()[0] if tree.selection() else None
+            if not item:
+                return
+            
+            # Clear dummy items and load real subdirectories
+            children = tree.get_children(item)
+            for child in children:
+                tree.delete(child)
+            
+            path = item_paths.get(item)
+            if path and path.is_dir():
+                populate_tree(item, path)
+        
+        def on_tree_click(event):
+            """Handle click on tree - select directory immediately."""
+            # Get the item that was clicked on
+            item = tree.identify('item', event.x, event.y)
+            if not item or item not in item_paths:
+                return
+            
+            selected_path = item_paths[item]
+            selected_dir[0] = str(selected_path)
+            # Close dialog after short delay to allow the click to register
+            dir_dialog.after(100, dir_dialog.destroy)
+        
+        def on_tree_double_click(event):
+            """Handle double-click on tree to expand/navigate."""
+            # Get the item that was clicked on
+            item = tree.identify('item', event.x, event.y)
+            if not item or item not in item_paths:
+                return
+            
+            # Expand if not already expanded
+            if not tree.item(item, 'open'):
+                tree.item(item, open=True)
+                # Trigger expand event manually
+                tree.event_generate("<<TreeviewOpen>>")
+        
+        tree.bind("<Button-1>", on_tree_click)
+        tree.bind("<Double-Button-1>", on_tree_double_click)
+        tree.bind("<<TreeviewOpen>>", on_tree_expand)
+        
+        # Initialize tree with root
+        populate_tree("", current_path)
+        
+        # Add "Up" button
+        control_frame = ttk.Frame(dir_dialog)
+        control_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        def go_up():
+            """Go up one directory level."""
+            nonlocal current_path
+            if current_path.parent != current_path:
+                current_path = current_path.parent
+                path_var.set(str(current_path))
+                # Refresh tree
+                tree.delete(*tree.get_children())
+                item_paths.clear()
+                populate_tree("", current_path)
+        
+        ttk.Button(control_frame, text="⬆ Up", command=go_up).pack(side=tk.LEFT, padx=2)
+        
+        # Buttons frame
+        button_frame = ttk.Frame(dir_dialog)
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        def cancel():
+            """Cancel directory selection."""
+            selected_dir[0] = None
+            dir_dialog.destroy()
+        
+        ttk.Button(button_frame, text="Cancel", command=cancel).pack(side=tk.RIGHT, padx=5)
+        
+        # Bring dialog to front and focus
+        dir_dialog.focus_force()
+        dir_dialog.lift()
+        
+        # Wait for dialog to close
+        self.root.wait_window(dir_dialog)
+        
+        return selected_dir[0]
     
     def _show_controller_dialog(self):
         """Show dialog to select chunks directory and workers.json configuration."""
@@ -666,6 +844,7 @@ class QasmAnalyzerGUI:
         dialog.geometry("600x700")
         dialog.transient(self.root)
         dialog.grab_set()
+        self._focus_window(dialog)
         
         # Track original config and whether we're using localhost
         original_config = {}
@@ -772,15 +951,23 @@ class QasmAnalyzerGUI:
             chunks_dir = dir_var.get()
             
             if not chunks_dir:
-                messagebox.showwarning("No Directory", 
-                    "Please select a chunks directory first.")
+                self._show_messagebox(
+                    messagebox.showwarning,
+                    "No Directory",
+                    "Please select a chunks directory first.",
+                    parent=dialog
+                )
                 use_localhost_var.set(False)
                 return None
             
             chunks_dir_path = Path(chunks_dir)
             if not chunks_dir_path.exists() or not chunks_dir_path.is_dir():
-                messagebox.showwarning("Invalid Directory", 
-                    f"The selected path is not a valid directory:\n{chunks_dir}")
+                self._show_messagebox(
+                    messagebox.showwarning,
+                    "Invalid Directory",
+                    f"The selected path is not a valid directory:\n{chunks_dir}",
+                    parent=dialog
+                )
                 use_localhost_var.set(False)
                 return None
             
@@ -803,7 +990,7 @@ class QasmAnalyzerGUI:
                         error_msg += f"  • {f.name}\n"
                     error_msg += f"\nNumbered chunks must be named: 0.qasm, 1.qasm, 2.qasm, etc."
                 
-                messagebox.showwarning("No Numbered Chunks", error_msg)
+                self._show_messagebox(messagebox.showwarning, "No Numbered Chunks", error_msg, parent=dialog)
                 use_localhost_var.set(False)
                 return None
             
@@ -932,8 +1119,8 @@ class QasmAnalyzerGUI:
         def select_chunks_dir_with_check():
             """Browse for chunks directory."""
             initial_dir = Path.cwd() / "split-out"
-            directory = filedialog.askdirectory(
-                title="Select directory with QASM chunks",
+            directory = self._custom_ask_directory(
+                title="Select Chunks Directory (Single-click to select)",
                 initialdir=str(initial_dir) if initial_dir.exists() else None
             )
             if directory:
@@ -972,25 +1159,44 @@ class QasmAnalyzerGUI:
             
             # Step 1: Validate chunks directory
             if not chunks_dir:
-                messagebox.showwarning("No Directory", "Please select a chunks directory first.")
+                self._show_messagebox(
+                    messagebox.showwarning,
+                    "No Directory",
+                    "Please select a chunks directory first.",
+                    parent=dialog
+                )
                 return
             
             if not Path(chunks_dir).exists():
-                messagebox.showerror("Invalid Directory", f"Directory not found: {chunks_dir}")
+                self._show_messagebox(
+                    messagebox.showerror,
+                    "Invalid Directory",
+                    f"Directory not found: {chunks_dir}",
+                    parent=dialog
+                )
                 return
             
             # Step 2: Validate config file path
             if not config_file:
-                messagebox.showwarning("No Config File", "Please specify a workers.json file location.")
+                self._show_messagebox(
+                    messagebox.showwarning,
+                    "No Config File",
+                    "Please specify a workers.json file location.",
+                    parent=dialog
+                )
                 return
             
             # Step 3: Get current configuration from preview (which may have been edited)
             current_config = get_current_preview_config()
             
             if not current_config:
-                messagebox.showwarning("No Workers", 
+                self._show_messagebox(
+                    messagebox.showwarning,
+                    "No Workers",
                     "No workers configuration found.\n\n"
-                    "Please enable localhost configuration or manually edit the preview.")
+                    "Please enable localhost configuration or manually edit the preview.",
+                    parent=dialog
+                )
                 return
             
             # Step 4: Validate we have enough workers
@@ -1006,21 +1212,25 @@ class QasmAnalyzerGUI:
             num_workers = len(current_config)
             
             if num_chunks > num_workers:
-                messagebox.showerror(
+                self._show_messagebox(
+                    messagebox.showerror,
                     "Insufficient Workers",
                     f"Error: You have {num_chunks} chunks but only {num_workers} worker(s).\n\n"
-                    f"You need at least {num_chunks} workers to distribute all chunks."
+                    f"You need at least {num_chunks} workers to distribute all chunks.",
+                    parent=dialog
                 )
                 return
             
             # Step 5: Confirm workers are running (if not using localhost)
             if not using_localhost:
-                confirm = messagebox.askyesno(
+                confirm = self._show_messagebox(
+                    messagebox.askyesno,
                     "Confirm Workers Running",
                     f"⚠ Important: Make sure all {num_workers} worker(s) are running on their respective hosts!\n\n"
                     f"Workers should be listening on ports {', '.join(addr.split(':')[1] if ':' in addr else addr for addr in sorted(current_config.values())[:5])}{'...' if len(current_config) > 5 else ''}\n\n"
                     f"Click 'Yes' if workers are running and ready.\n"
                     f"Click 'No' to cancel and start workers first.",
+                    parent=dialog,
                     icon='warning'
                 )
                 
@@ -1033,7 +1243,7 @@ class QasmAnalyzerGUI:
                     json.dump(current_config, f, indent=4)
                 print(f"Saved workers configuration to: {config_file}")
             except Exception as e:
-                messagebox.showerror("Save Error", f"Failed to save configuration:\n{e}")
+                self._show_messagebox(messagebox.showerror, "Save Error", f"Failed to save configuration:\n{e}", parent=dialog)
                 return
             
             # Step 7: Close dialog and launch distribution dialog
@@ -1049,20 +1259,21 @@ class QasmAnalyzerGUI:
         """Show distribution dialog with integrated worker management and controller."""
         dist_dialog = tk.Toplevel(self.root)
         dist_dialog.title("Distribution - Controller & Workers")
-        dist_dialog.geometry("900x700")
+        dist_dialog.geometry("1200x900")
         dist_dialog.transient(self.root)
         dist_dialog.grab_set()
+        self._focus_window(dist_dialog)
         
         # Track worker processes and threads
         worker_processes = {}
         worker_threads = {}
         worker_running = {}
         
-        # Create main paned window (horizontal split)
-        main_paned = ttk.PanedWindow(dist_dialog, orient=tk.HORIZONTAL)
+        # Create main paned window (vertical split - workers on top, controller on bottom)
+        main_paned = ttk.PanedWindow(dist_dialog, orient=tk.VERTICAL)
         main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Left panel: Workers (only if localhost mode)
+        # Top panel: Workers (only if localhost mode)
         if localhost_mode:
             workers_frame = ttk.LabelFrame(main_paned, text="Local Workers", padding="5")
             main_paned.add(workers_frame, weight=1)
@@ -1096,8 +1307,11 @@ class QasmAnalyzerGUI:
                 control_frame = ttk.Frame(tab_frame)
                 control_frame.pack(fill=tk.X, padx=5, pady=5)
                 
-                start_btn = ttk.Button(control_frame, text="▶ Start", 
-                                      command=lambda wid=worker_id, p=port: self._start_worker(wid, p, worker_outputs, worker_running, worker_threads, worker_buttons))
+                start_btn = tk.Button(control_frame, text="▶ Start",
+                                     command=lambda wid=worker_id, p=port: self._start_worker(wid, p, worker_outputs, worker_running, worker_threads, worker_buttons),
+                                     bg='#4CAF50', fg='white',
+                                     font=('Arial', 10, 'bold'), relief=tk.RAISED, bd=2,
+                                     padx=10, pady=5, cursor='hand2')
                 start_btn.pack(side=tk.LEFT, padx=2)
                 
                 stop_btn = ttk.Button(control_frame, text="⏹ Stop", state='disabled',
@@ -1107,9 +1321,16 @@ class QasmAnalyzerGUI:
                 worker_buttons[worker_id] = {'start': start_btn, 'stop': stop_btn}
                 worker_running[worker_id] = False
                 
-                # Output text area
-                output_text = scrolledtext.ScrolledText(tab_frame, height=20, font=('Courier', 9), 
-                                                       bg='#1e1e1e', fg='#d4d4d4', insertbackground='white')
+                # Output text area with better width for long lines
+                output_text = scrolledtext.ScrolledText(tab_frame, height=12, font=('Courier', 9), 
+                                                       bg='#1e1e1e', fg='#d4d4d4', insertbackground='white',
+                                                       wrap=tk.NONE)  # Don't wrap lines
+                # Configure color tags for worker output
+                output_text.tag_config('success', foreground='#4CAF50')  # Green
+                output_text.tag_config('error', foreground='#FF6B6B')   # Red
+                output_text.tag_config('warning', foreground='#FFA500') # Orange
+                output_text.tag_config('normal', foreground='#d4d4d4')  # Default
+                
                 output_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
                 output_text.insert('1.0', f"Worker {worker_id} on port {port}\nReady to start...\n")
                 worker_outputs[worker_id] = output_text
@@ -1125,7 +1346,7 @@ class QasmAnalyzerGUI:
                                  justify=tk.CENTER)
             msg_label.pack(expand=True)
         
-        # Right panel: Controller
+        # Bottom panel: Controller
         controller_frame = ttk.LabelFrame(main_paned, text="Controller", padding="5")
         main_paned.add(controller_frame, weight=1)
         
@@ -1133,17 +1354,27 @@ class QasmAnalyzerGUI:
         ctrl_control_frame = ttk.Frame(controller_frame)
         ctrl_control_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        distribute_btn = ttk.Button(ctrl_control_frame, text="📤 Distribute Chunks",
-                                   command=lambda: self._distribute_chunks(chunks_dir, config_file, controller_output))
+        distribute_btn = tk.Button(ctrl_control_frame, text="📤 Distribute Chunks",
+                                  command=lambda: self._distribute_chunks(chunks_dir, config_file, controller_output),
+                                  bg='#4CAF50', fg='white',
+                                  font=('Arial', 10, 'bold'), relief=tk.RAISED, bd=2,
+                                  padx=10, pady=5, cursor='hand2')
         distribute_btn.pack(side=tk.LEFT, padx=5)
         
         clear_btn = ttk.Button(ctrl_control_frame, text="Clear Output",
                               command=lambda: controller_output.delete('1.0', tk.END))
         clear_btn.pack(side=tk.LEFT, padx=5)
         
-        # Controller output
-        controller_output = scrolledtext.ScrolledText(controller_frame, height=20, font=('Courier', 9),
-                                                     bg='#1e1e1e', fg='#d4d4d4', insertbackground='white')
+        # Controller output with no line wrapping
+        controller_output = scrolledtext.ScrolledText(controller_frame, height=12, font=('Courier', 9),
+                                                     bg='#1e1e1e', fg='#d4d4d4', insertbackground='white',
+                                                     wrap=tk.NONE)  # Don't wrap lines
+        # Configure color tags for controller output
+        controller_output.tag_config('success', foreground='#4CAF50')  # Green
+        controller_output.tag_config('error', foreground='#FF6B6B')   # Red
+        controller_output.tag_config('warning', foreground='#FFA500') # Orange
+        controller_output.tag_config('normal', foreground='#d4d4d4')  # Default
+        
         controller_output.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         controller_output.insert('1.0', f"Controller ready to distribute chunks from:\n{chunks_dir}\n\n"
                                        f"Using configuration: {config_file}\n"
@@ -1187,41 +1418,34 @@ class QasmAnalyzerGUI:
         
         # Message queue for thread-safe output
         output_queue = queue.Queue()
+        # Mark as running immediately so the poller keeps running from the start
+        worker_running[worker_id] = True
+        worker_threads[worker_id] = {'worker': None, 'queue': output_queue}
         
         def worker_thread():
             """Worker thread function."""
             try:
-                # Redirect stdout to capture worker output
-                import sys
-                from io import StringIO
-                
-                # Custom writer that puts messages in queue
-                class QueueWriter:
-                    def write(self, msg):
-                        if msg.strip():
-                            output_queue.put(msg)
-                    def flush(self):
-                        pass
-                
-                old_stdout = sys.stdout
-                sys.stdout = QueueWriter()
-                
-                worker = Worker(port=port, host="127.0.0.1", output_dir=str(output_dir))
-                worker_running[worker_id] = True
+                # Inform user that output is ready
+                output_queue.put("[System] Worker output capture started\n")
+
+                def output_callback(msg: str) -> None:
+                    output_queue.put(msg)
+
+                worker = Worker(
+                    port=port,
+                    host="127.0.0.1",
+                    output_dir=str(output_dir),
+                    output_callback=output_callback,
+                )
                 worker_threads[worker_id] = {'worker': worker, 'queue': output_queue}
-                
-                output_queue.put(f"Worker listening on 127.0.0.1:{port}\n")
-                output_queue.put(f"Output directory: {output_dir}\n")
-                output_queue.put("Waiting for files...\n")
                 
                 worker.start()
                 
             except Exception as e:
-                output_queue.put(f"Error: {e}\n")
+                output_queue.put(f"[ERROR] Worker exception: {e}\n")
             finally:
-                sys.stdout = old_stdout
                 worker_running[worker_id] = False
-                output_queue.put(f"Worker stopped.\n")
+                output_queue.put(f"[System] Worker stopped.\n")
         
         # Start worker thread
         thread = threading.Thread(target=worker_thread, daemon=True)
@@ -1233,17 +1457,42 @@ class QasmAnalyzerGUI:
         
         # Start output poller
         def poll_output():
-            """Poll the output queue and update the text widget."""
+            """Poll the output queue and update the text widget with colored output."""
+            messages_processed = 0
             try:
+                if not output_widget.winfo_exists():
+                    return
+                # Drain entire queue
                 while True:
                     msg = output_queue.get_nowait()
-                    output_widget.insert(tk.END, msg)
+                    if not msg:
+                        continue
+                    
+                    messages_processed += 1
+                    
+                    # Determine tag based on message content
+                    tag = 'normal'
+                    msg_lower = msg.lower()
+                    
+                    # Check for success messages (green)
+                    if any(x in msg_lower for x in ['✓', 'received', 'listening', 'success', 'sent', 'ready', 'waiting for files', 'output directory', 'capture started']):
+                        tag = 'success'
+                    # Check for error messages (red)
+                    elif any(x in msg_lower for x in ['✗', 'failed', 'error', 'refused', 'cannot', 'exception']):
+                        tag = 'error'
+                    
+                    output_widget.insert(tk.END, msg, tag)
                     output_widget.see(tk.END)
-            except:
+            except queue.Empty:
                 pass
+            except tk.TclError:
+                # Widget was destroyed while polling
+                return
+            except Exception as e:
+                print(f"Poll error: {e}")
             
             # Schedule next poll if worker is still running
-            if worker_running.get(worker_id, False):
+            if output_widget.winfo_exists() and (worker_running.get(worker_id, False) or not output_queue.empty()):
                 self.root.after(100, poll_output)
         
         self.root.after(100, poll_output)
@@ -1301,9 +1550,24 @@ class QasmAnalyzerGUI:
         thread.start()
     
     def _append_controller_output(self, output_widget: scrolledtext.ScrolledText, text: str):
-        """Append text to controller output widget."""
-        output_widget.insert(tk.END, text)
-        output_widget.insert(tk.END, f"\n[{self._timestamp()}] Distribution completed.\n")
+        """Append text to controller output widget with colored output based on keywords."""
+        # Split text into lines and apply colors to each line
+        for line in text.split('\n'):
+            if not line:
+                output_widget.insert(tk.END, '\n')
+                continue
+                
+            # Determine tag based on line content - only color clear errors and successes
+            tag = 'normal'
+            if 'Error' in line or 'refused' in line.lower() or 'failed' in line.lower() or '✗' in line:
+                tag = 'error'
+            elif 'Success' in line or 'Sent' in line or 'completed' in line.lower() or '✓' in line:
+                tag = 'success'
+            
+            output_widget.insert(tk.END, line + '\n', tag)
+        
+        # Add completion message in green
+        output_widget.insert(tk.END, f"[{self._timestamp()}] Distribution completed.\n", 'success')
         output_widget.see(tk.END)
     
     def _timestamp(self) -> str:
@@ -1332,7 +1596,7 @@ class QasmAnalyzerGUI:
                 
             except Exception as e:
                 error_msg = f"Error during distribution:\n{str(e)}"
-                self.root.after(0, lambda: messagebox.showerror("Distribution Error", error_msg))
+                self.root.after(0, lambda: self._show_messagebox(messagebox.showerror, "Distribution Error", error_msg))
         
         # Run in background thread
         thread = Thread(target=distribute, daemon=True)
@@ -1347,6 +1611,7 @@ class QasmAnalyzerGUI:
         results_window.title("Distribution Results")
         results_window.geometry("700x500")
         results_window.transient(self.root)
+        self._focus_window(results_window)
         
         # Results text
         results_text = scrolledtext.ScrolledText(results_window, wrap=tk.WORD, font=('Courier', 9))
