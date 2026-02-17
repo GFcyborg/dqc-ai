@@ -1,103 +1,80 @@
 # DQC Pragma Grammar
 
-## Overview
+Marks split points in quantum circuits for distributed execution.
 
-The DQC (Distributed Quantum Computing) pragma grammar is a minimalistic ANTLR4 grammar designed to recognize pragma directives in `.dqc` files. These pragmas mark split points in quantum programs for distributed execution.
-
-## Pragma Format
+## Format
 
 ```
 pragma dqc.vX.split id=N
 ```
 
-Where:
-- `X` is the version number (integer)
-- `N` is the split-point ID (integer, starting from 1)
+- **X** = version number (integer, e.g., 1)
+- **N** = split ID (integer, starting from 1)
 
-**Note**: Split ID 0 is reserved for the implicit initial chunk (before the first pragma).
+Example:
+```qasm
+OPENQASM 3.0;
+qubit[2] q;
 
-## Grammar Files
+h q[0];
+cx q[0], q[1];
 
-- **DQCLexer.g4**: Lexer grammar that recognizes pragma lines and passes through all other content
-- **DQCParser.g4**: Parser grammar that structures the input into lines (pragmas or other content)
+pragma dqc.v1.split id=1
 
-## Design Principles
-
-1. **Minimalistic**: The grammar only recognizes pragma lines; everything else is treated as pass-through content
-2. **Non-invasive**: Other QASM code remains completely untouched
-3. **Line-based**: Each line is either a pragma or other content
-4. **Version-aware**: The version number allows for future extensions
+measure q;
+```
 
 ## Usage
 
-### Generating the Parser
+### In Code
 
-```bash
-./gradlew generateDQCGrammar
+Simply insert pragmas where you want to mark split points:
+
+```qasm
+// Chunk 0 - preparation
+qubit[3] q;
+h q;
+
+pragma dqc.v1.split id=1
+
+// Chunk 1 - operations
+cx q[0], q[1];
+
+pragma dqc.v1.split id=2
+
+// Chunk 2 - measurement
+measure q;
 ```
 
-This generates Python parser code in `src/main/python/parser/generated/`:
-- `DQCLexer.py`
-- `DQCParser.py`
-- `DQCParserVisitor.py`
+### From GUI
 
-### Using the Parser Wrapper
+Click lines in the "Source Code" tab - the GUI automatically marks split points and exports chunks with appropriate pragmas.
+
+## Grammar Files
+
+- `dqcLexer.g4` - Recognizes pragma lines
+- `dqcParser.g4` - Structures lines into pragmas or other content
+
+Generated parsers in: `src/main/python/parser/generated/`
+
+## Python API
 
 ```python
 from parser.dqc_parser import DQCPragmaParser
 
-# Create parser
 parser = DQCPragmaParser()
+pragmas = parser.parse_file('circuit.dqc')
 
-# Parse a .dqc file
-pragmas = parser.parse_file('example.dqc')
-
-# Or parse a string
-content = """
-OPENQASM 3.0;
-qubit q;
-pragma dqc.v1.split id=1
-h q;
-"""
-pragmas = parser.parse_string(content)
-
-# Each pragma contains:
 for pragma in pragmas:
-    print(f"Version: {pragma.version}")
-    print(f"Split ID: {pragma.split_id}")
-    print(f"Line number: {pragma.line_number}")
-    print(f"Raw text: {pragma.raw_text}")
+    print(f"ID: {pragma.split_id}, Line: {pragma.line_number}")
 ```
 
-### Validating Pragma Sequences
+Each pragma contains:
+- `version` - Version number from pragma
+- `split_id` - Split identifier
+- `line_number` - Line where pragma appears
+- `raw_text` - Original line text
 
-```python
-# Validate that split IDs are sequential and start from 1
-is_valid, error = DQCPragmaParser.validate_pragma_sequence(pragmas)
-
-if not is_valid:
-    print(f"Error: {error}")
-```
-
-## Example .dqc File
-
-```qasm
-OPENQASM 3.0;
-include "stdgates.inc";
-
-// Chunk 0 (implicit - no pragma needed)
-qubit[2] q;
-bit[2] c;
-
-pragma dqc.v1.split id=1
-// Chunk 1 starts here
-h q[0];
-cx q[0], q[1];
-
-pragma dqc.v1.split id=2
-// Chunk 2 starts here
-measure q -> c;
-```
 
 This file defines 3 chunks:
 - **Chunk 0** (lines 1-6): Declarations and setup

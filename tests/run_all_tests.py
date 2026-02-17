@@ -53,6 +53,8 @@ def main():
         ('Include Extraction Tests', os.path.join(TESTS_DIR, 'test_includes.py')),
         ('Include Save Tests', os.path.join(TESTS_DIR, 'test_save_includes.py')),
         ('Include Tabs Tests', os.path.join(TESTS_DIR, 'test_include_tabs.py')),
+        ('Distribution Dialog Tests', os.path.join(TESTS_DIR, 'test_distribution_dialog.py')),
+        ('Localhost Checkbox Tests', os.path.join(TESTS_DIR, 'test_localhost_checkbox.py')),
     ]
     
     results = {}

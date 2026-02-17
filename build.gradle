@@ -110,24 +110,42 @@ task setupPythonEnv {
     
     def venvPath = file("${project.projectDir}/.venv")
     def requirementsFile = file("${project.projectDir}/requirements.txt")
-    def venvRelPath = project.relativePath(venvPath)
-    def requirementsRelPath = project.relativePath(requirementsFile)
     def workDir = project.projectDir
     
     doLast {
         if (!venvPath.exists()) {
             println "Creating Python virtual environment..."
-            def createVenv = "python3 -m venv ${venvRelPath}".execute(null, workDir)
-            createVenv.waitFor()
+            def createVenv = new ProcessBuilder(
+                "python3",
+                "-m",
+                "venv",
+                venvPath.absolutePath
+            )
+            createVenv.directory(workDir)
+            def createProc = createVenv.start()
+            createProc.waitFor()
+            if (createProc.exitValue() != 0) {
+                throw new GradleException("Failed to create Python virtual environment")
+            }
         }
         
         println "Installing Python dependencies..."
-        def pipExe = System.getProperty("os.name").toLowerCase().contains("windows") 
-            ? "${venvRelPath}\\Scripts\\pip.exe" 
-            : "${venvRelPath}/bin/pip"
-        
-        def installDeps = "${pipExe} install -r ${requirementsRelPath}".execute(null, workDir)
-        installDeps.waitFor()
+        def pipExe = System.getProperty("os.name").toLowerCase().contains("windows")
+            ? new File(venvPath, "Scripts${File.separator}pip.exe").absolutePath
+            : new File(venvPath, "bin${File.separator}pip").absolutePath
+
+        def installDeps = new ProcessBuilder(
+            pipExe,
+            "install",
+            "-r",
+            requirementsFile.absolutePath
+        )
+        installDeps.directory(workDir)
+        def installProc = installDeps.start()
+        installProc.waitFor()
+        if (installProc.exitValue() != 0) {
+            throw new GradleException("Failed to install Python dependencies")
+        }
     }
 }
 

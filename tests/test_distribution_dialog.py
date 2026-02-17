@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Add src/main/python to path
-sys.path.insert(0, str(Path(__file__).parent / 'src' / 'main' / 'python'))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src' / 'main' / 'python'))
 
 def test_distribution_dialog():
     """Create a test window with the distribution dialog."""
@@ -26,8 +26,10 @@ def test_distribution_dialog():
         "2": "127.0.0.1:6662"
     }
     
-    chunks_dir = "./split-out/test"
-    config_file = "./src/main/python/choreo/workers.json"
+    # Get project root (parent of tests directory)
+    project_root = Path(__file__).parent.parent
+    chunks_dir = str(project_root / "split-out" / "test")
+    config_file = str(project_root / "src" / "main" / "python" / "choreo" / "workers.json")
     localhost_mode = True
     
     # Track worker processes and threads

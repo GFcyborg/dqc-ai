@@ -1,0 +1,10 @@
+ToDo:
+--
+remove absolute paths
+tests
+inject openqasm teleportations in a specific line
+explain how the chunk-vars are identified for exchange
+find eligible split points (before a loop?)
+signaling protocol among controller/worker nodes
+data-exchange protocol among worker-nodes
+...
