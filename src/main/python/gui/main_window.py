@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import requests
 import re
+import webbrowser
 from typing import Dict, List, Optional, Tuple, Callable
 import json
 import sys
@@ -93,10 +94,16 @@ class QasmAnalyzerGUI:
         
         # Controller mode menu
         controller_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Controller Mode", menu=controller_menu)
+        menubar.add_cascade(label="Controller", menu=controller_menu)
         controller_menu.add_command(label="Distribute chunks to workers", 
                         command=self._launch_controller_mode,
                         state='normal' if Controller else 'disabled')
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="Git-repo Readme", command=self._open_github_readme)
+        help_menu.add_command(label="License (GPL3)", command=self._open_license_file)
     
     def _setup_main_layout(self):
         main_frame = ttk.Frame(self.root, padding="5")
@@ -840,7 +847,7 @@ class QasmAnalyzerGUI:
     def _show_controller_dialog(self):
         """Show dialog to select chunks directory and workers_filesrv.json configuration."""
         dialog = tk.Toplevel(self.root)
-        dialog.title("Controller Mode - Distribute Chunks to Workers")
+        dialog.title("Controller - Distribute Chunks to Workers")
         dialog.geometry("600x700")
         dialog.transient(self.root)
         dialog.grab_set()
@@ -1767,6 +1774,18 @@ class QasmAnalyzerGUI:
                   command=results_window.destroy).pack(pady=10)
         
         self._show_status("Distribution completed!")
+    
+    def _open_github_readme(self):
+        """Open the project GitHub repository README in the default browser."""
+        webbrowser.open("https://github.com/GFcyborg/dqc-ai")
+    
+    def _open_license_file(self):
+        """Open the local LICENSE.txt file in the default browser."""
+        license_path = Path(__file__).parent.parent.parent.parent.parent / "LICENSE.txt"
+        if license_path.exists():
+            webbrowser.open(f"file://{license_path.absolute()}")
+        else:
+            messagebox.showerror("Error", f"License file not found at {license_path}")
     
     def run(self):
         self.root.mainloop()

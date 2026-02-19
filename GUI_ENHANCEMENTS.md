@@ -16,14 +16,14 @@ Access 20+ official OpenQASM examples directly from GitHub:
 
 Automatically updates when new examples are added.
 
-## Feature 3: Controller Mode - Distribute Chunks to Workers
+## Feature 3: Controller - Distribute Chunks to Workers
 
 Distribute saved circuit chunks to worker nodes for parallel execution.
 
 ### How to Use
 
 1. **Save chunks** → Click `✓ Analyze & Save Chunks` (creates `split-out/<circuit-name>/`)
-2. **Launch controller** → `Tools → Controller Mode...`
+2. **Launch controller** → `Tools → Controller...`
 3. **Select directory** → Choose the `split-out/<circuit-name>/` folder
 4. **Select config** → Choose `workers_filesrv.json` file (default: `src/main/python/choreo/workers_filesrv.json`)
 5. **Review config** → Preview shows worker addresses
@@ -59,7 +59,7 @@ Maps worker IDs to network addresses (hostname:port).
 3. Analyze & Save Chunks
    # Saves to: split-out/teleport/0.qasm, 1.qasm, 2.qasm
 
-4. Tools → Controller Mode
+4. Tools → Controller
 5. Select Directory: split-out/teleport/
 6. Select Config: src/main/python/choreo/workers_filesrv.json
 7. Launch Distribution

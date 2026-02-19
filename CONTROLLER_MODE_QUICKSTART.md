@@ -18,7 +18,7 @@ Example workers_filesrv.json:
 
 ## Distribute
 
-1. **Launch Controller Mode**: `Tools → Controller Mode...`
+1. **Launch Controller**: `Tools → Controller...`
 2. **Select chunks directory**: `split-out/<circuit-name>/`
 3. **Verify config**: See workers in "Workers Configuration Preview"
 4. **Launch Distribution**: Click "Launch Distribution"
@@ -33,7 +33,7 @@ Example workers_filesrv.json:
 3. Analyze & Save Chunks
    # Creates: split-out/teleport/0.qasm, 1.qasm, 2.qasm
 
-4. Tools → Controller Mode
+4. Tools → Controller
 5. Directory: split-out/teleport/
 6. Config: src/main/python/choreo/workers_filesrv.json
 7. Launch Distribution
@@ -48,7 +48,7 @@ Example workers_filesrv.json:
 
 | Problem | Solution |
 |---------|----------|
-| "Controller Mode" menu disabled | Make sure `choreo/controller.py` module exists |
+| "Controller" menu disabled | Make sure `choreo/controller.py` module exists |
 | Can't select chunks directory | Run `Analyze & Save Chunks` first |
 | Worker not found error | Check workers_filesrv.json addresses and that workers are listening |
 | Network timeout | Verify worker nodes are reachable (ping/netstat) |

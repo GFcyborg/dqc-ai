@@ -16,7 +16,7 @@
    └─> Edit src/main/python/choreo/workers_filesrv.json
 
 5. Distribute
-   └─> Tools → Controller Mode
+   └─> Tools → Controller
        ├─ Select chunks directory
        ├─ Verify worker config
        └─ Launch Distribution
@@ -56,7 +56,7 @@ if (c[0]) z q[1];
 2. **Mark**: Click lines 9 and 14
 3. **Save**: Analyze & Save Chunks
    - Creates: `split-out/teleport/0.qasm`, `1.qasm`, `2.qasm`
-4. **Distribute**: Tools → Controller Mode
+4. **Distribute**: Tools → Controller
    - Select: `split-out/teleport/`
    - Verify: workers_filesrv.json shows 3 workers
    - Launch: Sends files to workers

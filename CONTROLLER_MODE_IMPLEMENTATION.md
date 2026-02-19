@@ -4,7 +4,7 @@ Adds distributed chunk execution to the GUI.
 
 ## What Was Added
 
-1. **New Menu**: `Tools → Controller Mode...` 
+1. **New Menu**: `Tools → Controller...` 
 2. **Dialog Window**: Select chunks directory and worker configuration
 3. **Background Distribution**: Files sent in background thread (non-blocking GUI)
 4. **Results Window**: Shows transfer status for each file
@@ -25,7 +25,7 @@ Modified `distribute_files()` to raise `ValueError` instead of `sys.exit()` for 
 
 ## Workflow
 
-1. User clicks `Tools → Controller Mode...`
+1. User clicks `Tools → Controller...`
 2. Dialog opens to select:
    - Chunks directory (e.g., `split-out/circuit-name/`)
    - Workers config file (e.g., `workers_filesrv.json`)

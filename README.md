@@ -17,7 +17,7 @@ Split quantum circuits into distributed chunks with automatic variable dependenc
 2. **Mark split points** → Click lines where you want to split
 3. **View variables** → See dependencies in "Variable Analysis" tab
 4. **Save chunks** → Click `✓ Analyze & Save Chunks`
-5. **Optional: Distribute** → `Tools → Controller Mode` to send chunks to workers
+5. **Optional: Distribute** → `Tools → Controller` to send chunks to workers
 
 ## Features
 

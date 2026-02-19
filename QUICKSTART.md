@@ -40,7 +40,7 @@ Analyze & Save Chunks
 |------|-------|
 | Use your own QASM file | `File → Open Local File → Select file` |
 | See circuit structure | Switch to `AST View` tab |
-| Distribute to workers | `Tools → Controller Mode` |
+| Distribute to workers | `Tools → Controller` |
 | Run tests | `./gradlew test` or `python3 tests/run_all_tests.py` |
 
 ## Troubleshooting
