@@ -91,12 +91,14 @@ class QasmAnalyzerGUI:
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         
-        # Tools menu with Controller Mode
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Controller Mode...", 
-                               command=self._launch_controller_mode,
-                               state='normal' if Controller else 'disabled')
+        # Controller mode menu
+        controller_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Controller Mode", menu=controller_menu)
+        controller_menu.add_command(label="Distribute chunks to workers", 
+                        command=self._launch_controller_mode,
+                        state='normal' if Controller else 'disabled')
+        controller_menu.add_command(label="Run remote chunks", 
+                        command=self._launch_remote_chunks_dialog)
     
     def _setup_main_layout(self):
         main_frame = ttk.Frame(self.root, padding="5")
@@ -685,6 +687,23 @@ class QasmAnalyzerGUI:
             return
         
         self._show_controller_dialog()
+
+    def _launch_remote_chunks_dialog(self):
+        """Placeholder dialog for running remote chunks."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Controller Mode - Run Remote Chunks")
+        dialog.geometry("400x200")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self._focus_window(dialog)
+
+        content_frame = ttk.Frame(dialog, padding="20")
+        content_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(content_frame, text="Run remote chunks is not implemented yet.")\
+            .pack(pady=(0, 20))
+
+        ttk.Button(content_frame, text="Close", command=dialog.destroy).pack()
     
     def _custom_ask_directory(self, title="Select a Directory", initialdir=None):
         """Custom directory selection dialog with single-click selection."""
