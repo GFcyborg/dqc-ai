@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import requests
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Callable
 import json
 import sys
 import threading
@@ -1293,6 +1293,9 @@ class QasmAnalyzerGUI:
             workers_frame = ttk.LabelFrame(main_paned, text="Local Workers", padding="5")
             main_paned.add(workers_frame, weight=1)
             
+            workers_control_frame = ttk.Frame(workers_frame)
+            workers_control_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
+
             worker_notebook = ttk.Notebook(workers_frame)
             worker_notebook.pack(fill=tk.BOTH, expand=True)
             
@@ -1300,6 +1303,42 @@ class QasmAnalyzerGUI:
             worker_tabs = {}
             worker_outputs = {}
             worker_buttons = {}
+
+            def start_all_workers() -> None:
+                for worker_id in sorted(worker_config.keys(), key=lambda x: int(x)):
+                    address = worker_config[worker_id]
+                    if ':' not in address:
+                        continue
+
+                    host, port = address.rsplit(':', 1)
+                    if host not in ('127.0.0.1', 'localhost'):
+                        continue
+
+                    if worker_running.get(worker_id, False):
+                        continue
+
+                    self._start_worker(
+                        worker_id,
+                        int(port),
+                        worker_outputs,
+                        worker_running,
+                        worker_threads,
+                        worker_buttons,
+                    )
+
+            tk.Button(
+                workers_control_frame,
+                text="▶ Start all workers",
+                command=start_all_workers,
+                bg='#4CAF50',
+                fg='white',
+                font=('Arial', 10, 'bold'),
+                relief=tk.RAISED,
+                bd=2,
+                padx=10,
+                pady=5,
+                cursor='hand2',
+            ).pack(side=tk.LEFT)
             
             for worker_id in sorted(worker_config.keys(), key=lambda x: int(x)):
                 address = worker_config[worker_id]
@@ -1369,8 +1408,27 @@ class QasmAnalyzerGUI:
         ctrl_control_frame = ttk.Frame(controller_frame)
         ctrl_control_frame.pack(fill=tk.X, padx=5, pady=5)
         
+        distribution_state = {'completed': False}
+
+        def on_distribution_complete(success: bool) -> None:
+            if distribution_state['completed']:
+                return
+            distribution_state['completed'] = True
+            if success:
+                run_remote_btn.config(state='normal', bg='#E53935', activebackground='#D32F2F')
+
+        def start_distribution() -> None:
+            distribution_state['completed'] = False
+            run_remote_btn.config(state='disabled', bg='#B0B0B0', activebackground='#B0B0B0')
+            self._distribute_chunks(
+                chunks_dir,
+                config_file,
+                controller_output,
+                on_complete=on_distribution_complete,
+            )
+
         distribute_btn = tk.Button(ctrl_control_frame, text="📤 Distribute Chunks",
-                                  command=lambda: self._distribute_chunks(chunks_dir, config_file, controller_output),
+                                  command=start_distribution,
                                   bg='#4CAF50', fg='white',
                                   font=('Arial', 10, 'bold'), relief=tk.RAISED, bd=2,
                                   padx=10, pady=5, cursor='hand2')
@@ -1379,6 +1437,59 @@ class QasmAnalyzerGUI:
         clear_btn = ttk.Button(ctrl_control_frame, text="Clear Output",
                               command=lambda: controller_output.delete('1.0', tk.END))
         clear_btn.pack(side=tk.LEFT, padx=5)
+
+        def on_close():
+            """Clean up and close dialog."""
+            # Stop all running workers
+            if localhost_mode:
+                for worker_id in list(worker_running.keys()):
+                    if worker_running.get(worker_id, False):
+                        self._stop_worker(worker_id, worker_running, worker_threads, worker_buttons)
+            dist_dialog.destroy()
+            if parent_dialog is not None and parent_dialog.winfo_exists():
+                parent_dialog.deiconify()
+                self._focus_window(parent_dialog)
+
+        def show_remote_runtime_status():
+            """Placeholder view for remote runtime status."""
+            for child in dist_dialog.winfo_children():
+                child.destroy()
+
+            status_frame = ttk.Frame(dist_dialog, padding="20")
+            status_frame.pack(fill=tk.BOTH, expand=True)
+
+            ttk.Label(
+                status_frame,
+                text="Remote Runtime Status (placeholder)",
+                font=('Arial', 12, 'bold'),
+            ).pack(anchor=tk.W, pady=(0, 10))
+
+            status_text = scrolledtext.ScrolledText(status_frame, height=12, font=('Courier', 9),
+                                                    wrap=tk.NONE, state='normal')
+            status_text.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+            status_text.insert(tk.END, "Worker runtime status is not implemented yet.\n\n")
+            for worker_id in sorted(worker_config.keys(), key=lambda x: int(x)):
+                status_text.insert(tk.END, f"Worker {worker_id}: status unknown\n")
+            status_text.config(state='disabled')
+
+            ttk.Button(status_frame, text="Close", command=on_close).pack(anchor=tk.E)
+
+        run_remote_btn = tk.Button(
+            ctrl_control_frame,
+            text="Run remote chunks",
+            command=show_remote_runtime_status,
+            state='disabled',
+            bg='#B0B0B0',
+            fg='white',
+            font=('Arial', 10, 'bold'),
+            relief=tk.RAISED,
+            bd=2,
+            padx=10,
+            pady=5,
+            cursor='hand2',
+        )
+        run_remote_btn.pack(side=tk.LEFT, padx=5)
         
         # Controller output with no line wrapping
         controller_output = scrolledtext.ScrolledText(controller_frame, height=12, font=('Courier', 9),
@@ -1399,19 +1510,7 @@ class QasmAnalyzerGUI:
         # Bottom button frame
         bottom_frame = ttk.Frame(dist_dialog)
         bottom_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        def on_close():
-            """Clean up and close dialog."""
-            # Stop all running workers
-            if localhost_mode:
-                for worker_id in list(worker_running.keys()):
-                    if worker_running.get(worker_id, False):
-                        self._stop_worker(worker_id, worker_running, worker_threads, worker_buttons)
-            dist_dialog.destroy()
-            if parent_dialog is not None and parent_dialog.winfo_exists():
-                parent_dialog.deiconify()
-                self._focus_window(parent_dialog)
-        
+
         ttk.Button(bottom_frame, text="Close", command=on_close).pack(side=tk.RIGHT, padx=5)
         
         # Handle window close button
@@ -1527,11 +1626,26 @@ class QasmAnalyzerGUI:
         
         worker_running[worker_id] = False
         
-        # Update UI
-        worker_buttons[worker_id]['start'].config(state='normal')
-        worker_buttons[worker_id]['stop'].config(state='disabled')
+        # Update UI (guard against destroyed widgets)
+        buttons = worker_buttons.get(worker_id, {})
+        start_btn = buttons.get('start')
+        stop_btn = buttons.get('stop')
+        try:
+            if start_btn and start_btn.winfo_exists():
+                start_btn.config(state='normal')
+            if stop_btn and stop_btn.winfo_exists():
+                stop_btn.config(state='disabled')
+        except tk.TclError:
+            # UI was destroyed; ignore UI updates
+            pass
     
-    def _distribute_chunks(self, chunks_dir: str, config_file: str, output_widget: scrolledtext.ScrolledText):
+    def _distribute_chunks(
+        self,
+        chunks_dir: str,
+        config_file: str,
+        output_widget: scrolledtext.ScrolledText,
+        on_complete: Optional[Callable[[bool], None]] = None,
+    ):
         """Distribute chunks using the controller."""
         output_widget.insert(tk.END, f"\n{'='*60}\n")
         output_widget.insert(tk.END, f"[{self._timestamp()}] Starting distribution...\n")
@@ -1556,18 +1670,29 @@ class QasmAnalyzerGUI:
                 sys.stdout = old_stdout
                 output = output_buffer.getvalue()
                 
+                error_markers = ["✗", "Error", "failed", "refused", "No acknowledgment"]
+                success = not any(marker in output for marker in error_markers)
+
                 # Update output widget
                 self.root.after(0, lambda: self._append_controller_output(output_widget, output))
+                if on_complete:
+                    self.root.after(0, lambda: on_complete(success))
                 
             except Exception as e:
                 self.root.after(0, lambda: self._append_controller_output(
                     output_widget, f"Error during distribution:\n{str(e)}\n"))
+                if on_complete:
+                    self.root.after(0, lambda: on_complete(False))
         
         # Run in background thread
         thread = Thread(target=distribute, daemon=True)
         thread.start()
     
-    def _append_controller_output(self, output_widget: scrolledtext.ScrolledText, text: str):
+    def _append_controller_output(
+        self,
+        output_widget: scrolledtext.ScrolledText,
+        text: str,
+    ):
         """Append text to controller output widget with colored output based on keywords."""
         # Split text into lines and apply colors to each line
         for line in text.split('\n'):
