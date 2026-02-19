@@ -126,7 +126,12 @@ class Worker:
         """Stop the worker server."""
         self.running = False
         if self.server_socket:
+            try:
+                self.server_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             self.server_socket.close()
+            self.server_socket = None
         self._emit("Worker stopped")
 
 
