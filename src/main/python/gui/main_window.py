@@ -97,8 +97,6 @@ class QasmAnalyzerGUI:
         controller_menu.add_command(label="Distribute chunks to workers", 
                         command=self._launch_controller_mode,
                         state='normal' if Controller else 'disabled')
-        controller_menu.add_command(label="Run remote chunks", 
-                        command=self._launch_remote_chunks_dialog)
     
     def _setup_main_layout(self):
         main_frame = ttk.Frame(self.root, padding="5")
@@ -688,23 +686,6 @@ class QasmAnalyzerGUI:
         
         self._show_controller_dialog()
 
-    def _launch_remote_chunks_dialog(self):
-        """Placeholder dialog for running remote chunks."""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Controller Mode - Run Remote Chunks")
-        dialog.geometry("400x200")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        self._focus_window(dialog)
-
-        content_frame = ttk.Frame(dialog, padding="20")
-        content_frame.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(content_frame, text="Run remote chunks is not implemented yet.")\
-            .pack(pady=(0, 20))
-
-        ttk.Button(content_frame, text="Close", command=dialog.destroy).pack()
-    
     def _custom_ask_directory(self, title="Select a Directory", initialdir=None):
         """Custom directory selection dialog with single-click selection."""
         selected_dir = [None]  # Use list to allow modification in nested functions
@@ -1273,16 +1254,23 @@ class QasmAnalyzerGUI:
                 self._show_messagebox(messagebox.showerror, "Save Error", f"Failed to save configuration:\n{e}", parent=dialog)
                 return
             
-            # Step 7: Close dialog and launch distribution dialog
-            dialog.destroy()
-            self._show_distribution_dialog(chunks_dir, config_file, current_config, using_localhost)
+            # Step 7: Hide dialog and launch distribution dialog
+            dialog.withdraw()
+            self._show_distribution_dialog(chunks_dir, config_file, current_config, using_localhost, parent_dialog=dialog)
         
         ttk.Button(button_frame, text="Launch Distribution", 
                   command=save_and_launch_distribution).pack(side=tk.RIGHT, padx=5)
         ttk.Button(button_frame, text="Cancel", 
                   command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
     
-    def _show_distribution_dialog(self, chunks_dir: str, config_file: str, worker_config: dict, localhost_mode: bool):
+    def _show_distribution_dialog(
+        self,
+        chunks_dir: str,
+        config_file: str,
+        worker_config: dict,
+        localhost_mode: bool,
+        parent_dialog: Optional[tk.Toplevel] = None,
+    ):
         """Show distribution dialog with integrated worker management and controller."""
         dist_dialog = tk.Toplevel(self.root)
         dist_dialog.title("Distribution - Controller & Workers")
@@ -1420,6 +1408,9 @@ class QasmAnalyzerGUI:
                     if worker_running.get(worker_id, False):
                         self._stop_worker(worker_id, worker_running, worker_threads, worker_buttons)
             dist_dialog.destroy()
+            if parent_dialog is not None and parent_dialog.winfo_exists():
+                parent_dialog.deiconify()
+                self._focus_window(parent_dialog)
         
         ttk.Button(bottom_frame, text="Close", command=on_close).pack(side=tk.RIGHT, padx=5)
         
