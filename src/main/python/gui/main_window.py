@@ -857,7 +857,7 @@ class QasmAnalyzerGUI:
         return selected_dir[0]
     
     def _show_controller_dialog(self):
-        """Show dialog to select chunks directory and workers.json configuration."""
+        """Show dialog to select chunks directory and workers_filesrv.json configuration."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Controller Mode - Distribute Chunks to Workers")
         dialog.geometry("600x700")
@@ -886,8 +886,8 @@ class QasmAnalyzerGUI:
         
         config_var = tk.StringVar()
         
-        # Default to choreo/workers.json
-        default_workers_config = Path(__file__).resolve().parent.parent / "choreo" / "workers.json"
+        # Default to choreo/workers_filesrv.json
+        default_workers_config = Path(__file__).resolve().parent.parent / "choreo" / "workers_filesrv.json"
         if default_workers_config.exists():
             config_var.set(str(default_workers_config))
         
@@ -922,7 +922,7 @@ class QasmAnalyzerGUI:
         preview_text.pack(fill=tk.BOTH, expand=True)
         
         def load_original_config():
-            """Load the original workers.json from disk."""
+            """Load the original workers_filesrv.json from disk."""
             nonlocal original_config
             config_path = config_var.get()
             if config_path and Path(config_path).exists():
@@ -1149,10 +1149,10 @@ class QasmAnalyzerGUI:
         browse_dir_button.config(command=select_chunks_dir_with_check)
         
         def select_config_file_with_check():
-            """Browse for workers.json file."""
+            """Browse for workers_filesrv.json file."""
             initial_dir = Path(__file__).resolve().parent.parent / "choreo"
             config_file = filedialog.askopenfilename(
-                title="Select workers.json configuration file",
+                title="Select workers_filesrv.json configuration file",
                 initialdir=str(initial_dir),
                 filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
             )
@@ -1195,15 +1195,23 @@ class QasmAnalyzerGUI:
                 )
                 return
             
-            # Step 2: Validate config file path
+            # Step 2: Validate/generate config file path
             if not config_file:
-                self._show_messagebox(
-                    messagebox.showwarning,
-                    "No Config File",
-                    "Please specify a workers.json file location.",
-                    parent=dialog
-                )
-                return
+                # If localhost mode is enabled, auto-generate and save config
+                if use_localhost_var.get():
+                    default_config_dir = Path(__file__).resolve().parent.parent / "choreo"
+                    default_config_dir.mkdir(parents=True, exist_ok=True)
+                    config_file = str(default_config_dir / "workers_filesrv.json")
+                    config_var.set(config_file)
+                else:
+                    # Only show warning if not using localhost auto-config
+                    self._show_messagebox(
+                        messagebox.showwarning,
+                        "No Config File",
+                        "Please specify a workers_filesrv.json file location.",
+                        parent=dialog
+                    )
+                    return
             
             # Step 3: Get current configuration from preview (which may have been edited)
             current_config = get_current_preview_config()

@@ -5,9 +5,9 @@ Distribute saved quantum circuit chunks to worker nodes.
 ## Setup
 
 1. **Save chunks** from GUI: `✓ Analyze & Save Chunks` (creates `split-out/<circuit-name>/`)
-2. **Configure workers**: Edit `src/main/python/choreo/workers.json`
+2. **Configure workers**: Edit `src/main/python/choreo/workers_filesrv.json`
 
-Example workers.json:
+Example workers_filesrv.json:
 ```json
 {
     "0": "127.0.0.1:6660",
@@ -35,7 +35,7 @@ Example workers.json:
 
 4. Tools → Controller Mode
 5. Directory: split-out/teleport/
-6. Config: src/main/python/choreo/workers.json
+6. Config: src/main/python/choreo/workers_filesrv.json
 7. Launch Distribution
 
 # Output:
@@ -50,6 +50,6 @@ Example workers.json:
 |---------|----------|
 | "Controller Mode" menu disabled | Make sure `choreo/controller.py` module exists |
 | Can't select chunks directory | Run `Analyze & Save Chunks` first |
-| Worker not found error | Check workers.json addresses and that workers are listening |
+| Worker not found error | Check workers_filesrv.json addresses and that workers are listening |
 | Network timeout | Verify worker nodes are reachable (ping/netstat) |
 

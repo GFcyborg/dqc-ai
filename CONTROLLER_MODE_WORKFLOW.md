@@ -13,7 +13,7 @@
    └─> Analyze & Save Chunks → split-out/<name>/0.qasm, 1.qasm, 2.qasm
 
 4. Configure Workers (if needed)
-   └─> Edit src/main/python/choreo/workers.json
+   └─> Edit src/main/python/choreo/workers_filesrv.json
 
 5. Distribute
    └─> Tools → Controller Mode
@@ -58,7 +58,7 @@ if (c[0]) z q[1];
    - Creates: `split-out/teleport/0.qasm`, `1.qasm`, `2.qasm`
 4. **Distribute**: Tools → Controller Mode
    - Select: `split-out/teleport/`
-   - Verify: workers.json shows 3 workers
+   - Verify: workers_filesrv.json shows 3 workers
    - Launch: Sends files to workers
 
 ### Output
@@ -75,7 +75,7 @@ All files distributed successfully!
 
 ## Configuration
 
-### workers.json Format
+### workers_filesrv.json Format
 
 ```json
 {
@@ -91,7 +91,7 @@ All files distributed successfully!
 
 ### Custom Configuration
 
-Create a custom `workers.json`:
+Create a custom `workers_filesrv.json`:
 ```json
 {
     "0": "worker1.example.com:6660",

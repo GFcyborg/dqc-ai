@@ -29,7 +29,7 @@ def test_distribution_dialog():
     # Get project root (parent of tests directory)
     project_root = Path(__file__).parent.parent
     chunks_dir = str(project_root / "split-out" / "test")
-    config_file = str(project_root / "src" / "main" / "python" / "choreo" / "workers.json")
+    config_file = str(project_root / "src" / "main" / "python" / "choreo" / "workers_filesrv.json")
     localhost_mode = True
     
     # Track worker processes and threads

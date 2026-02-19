@@ -25,12 +25,12 @@ Distribute saved circuit chunks to worker nodes for parallel execution.
 1. **Save chunks** → Click `✓ Analyze & Save Chunks` (creates `split-out/<circuit-name>/`)
 2. **Launch controller** → `Tools → Controller Mode...`
 3. **Select directory** → Choose the `split-out/<circuit-name>/` folder
-4. **Select config** → Choose `workers.json` file (default: `src/main/python/choreo/workers.json`)
+4. **Select config** → Choose `workers_filesrv.json` file (default: `src/main/python/choreo/workers_filesrv.json`)
 5. **Review config** → Preview shows worker addresses
 6. **Distribute** → Click "Launch Distribution"
 7. **Monitor** → Results window shows each file being sent
 
-### workers.json Format
+### workers_filesrv.json Format
 
 ```json
 {
@@ -61,7 +61,7 @@ Maps worker IDs to network addresses (hostname:port).
 
 4. Tools → Controller Mode
 5. Select Directory: split-out/teleport/
-6. Select Config: src/main/python/choreo/workers.json
+6. Select Config: src/main/python/choreo/workers_filesrv.json
 7. Launch Distribution
 # Sends 0.qasm to worker 0, 1.qasm to worker 1, 2.qasm to worker 2
 ```

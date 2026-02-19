@@ -28,7 +28,7 @@ Modified `distribute_files()` to raise `ValueError` instead of `sys.exit()` for 
 1. User clicks `Tools → Controller Mode...`
 2. Dialog opens to select:
    - Chunks directory (e.g., `split-out/circuit-name/`)
-   - Workers config file (e.g., `workers.json`)
+   - Workers config file (e.g., `workers_filesrv.json`)
 3. Configuration preview shows worker addresses
 4. User clicks "Launch Distribution"
 5. Files sent in background (GUI stays responsive)

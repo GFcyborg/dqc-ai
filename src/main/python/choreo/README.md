@@ -12,7 +12,7 @@ Distributed orchestration system for quantum circuit processing. Implements a co
 
 ### 1. Prepare Workers Configuration
 
-Copy and edit `workers.json.example` to `workers.json`:
+Copy and edit `workers_filesrv.json.example` to `workers_filesrv.json`:
 
 ```json
 {
@@ -42,7 +42,7 @@ python -m choreo.worker 6662 --host 10.22.2.69 --output-dir ./work_output
 Distribute files from an input directory:
 
 ```bash
-python -m choreo.controller ./input_files/ --config workers.json
+python -m choreo.controller ./input_files/ --config workers_filesrv.json
 ```
 
 Files are matched to workers in order:
@@ -59,7 +59,7 @@ Files are matched to workers in order:
 from choreo import Controller
 from pathlib import Path
 
-config_file = Path("workers.json")
+config_file = Path("workers_filesrv.json")
 controller = Controller(config_file)
 controller.distribute_files("./input_files/")
 ```
@@ -88,7 +88,7 @@ Upon successful receipt, worker responds with: `ACK` (3 bytes)
 
 ## Configuration
 
-### workers.json
+### workers_filesrv.json
 
 Maps worker IDs (0, 1, 2...) to their network addresses:
 
@@ -125,4 +125,4 @@ Maps worker IDs (0, 1, 2...) to their network addresses:
 ## Default Directories
 
 - **Worker output**: `./work_received/` (customizable via `--output-dir`)
-- **Config lookup**: `choreo/workers.json` (customizable via `--config`)
+- **Config lookup**: `choreo/workers_filesrv.json` (customizable via `--config`)

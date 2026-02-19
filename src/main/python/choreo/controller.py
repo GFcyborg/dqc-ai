@@ -2,7 +2,7 @@
 Controller node for distributing quantum circuit files to worker nodes.
 
 Usage (CLI):
-    python -m choreo.controller <input_directory> [--output-config workers.json]
+    python -m choreo.controller <input_directory> [--output-config workers_filesrv.json]
 
 Usage (Python):
     from choreo import Controller
@@ -33,7 +33,7 @@ class Controller:
         Initialize controller with worker configuration.
         
         Args:
-            config_file: Path to workers.json mapping worker IDs to addresses
+            config_file: Path to workers_filesrv.json mapping worker IDs to addresses
         """
         with open(config_file, 'r') as f:
             self.workers = json.load(f)
@@ -188,7 +188,7 @@ def main():
         description="Controller node for distributing quantum circuit files"
     )
     parser.add_argument("directory", help="Input directory containing files to distribute")
-    parser.add_argument("--config", default=None, help="Worker configuration file (default: workers.json)")
+    parser.add_argument("--config", default=None, help="Worker configuration file (default: workers_filesrv.json)")
     
     args = parser.parse_args()
     
@@ -196,7 +196,7 @@ def main():
     if args.config is not None:
         config_file = Path(args.config)
     else:
-        config_file = Path(__file__).resolve().parent / "workers.json"
+        config_file = Path(__file__).resolve().parent / "workers_filesrv.json"
     
     if not config_file.exists():
         print(f"Error: workers configuration file not found: {config_file}")
