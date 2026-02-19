@@ -1,10 +1,18 @@
 ToDo:
 --
-remove absolute paths
-tests
+add menu items: license + link to git repo https://github.com/GFcyborg/dqc-ai
+add tests
 inject openqasm teleportations in a specific line
 explain how the chunk-vars are identified for exchange
 find eligible split points (before a loop?)
 signaling protocol among controller/worker nodes
 data-exchange protocol among worker-nodes
 ...
+
+take 1 qasm file
+>> insert split-point manually (=> automatic pragma insertion in *.dqc file)
+>> look for split pragma
+>> split orig file into numbered chunks of pure openqasm (i.e. remove split pragmas) into a dir named after the original qasm file; eventually [put stdlib include on top of each chunk]
+>> find out which data/vars are needed into next chunk (now it's only in comments as header of each chunk)
+>> insert teleport pragma
+>> accordingly controller orchestrates comm among workers, but data is share directly inter-workers (via teleportation)

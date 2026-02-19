@@ -15,8 +15,9 @@ import os
 import socket
 import sys
 import argparse
+import re
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 import time
 
 from .protocol import FileTransferProtocol
@@ -24,6 +25,8 @@ from .protocol import FileTransferProtocol
 
 class Controller:
     """Distributes quantum circuit files to worker nodes based on configuration."""
+
+    INCLUDE_PATTERN = re.compile(r'^\s*include\s+"([^"]+)"\s*;\s*$', re.IGNORECASE)
     
     def __init__(self, config_file: Path):
         """
@@ -60,6 +63,8 @@ class Controller:
         print(f"Using {len(self.workers)} workers from configuration\n")
         
         # Distribute files
+        input_dir_path = Path(input_dir).resolve()
+
         for i, file_name in enumerate(sorted(qasm_files)):
             worker_id = str(i)
             if worker_id not in self.workers:
@@ -70,9 +75,14 @@ class Controller:
             file_path = os.path.join(input_dir, file_name)
             
             print(f"Sending '{file_name}' to worker {worker_id} ({worker_addr})...")
-            self._send_file_to_worker(worker_addr, file_path, file_name)
+            sent = self._send_file_to_worker(worker_addr, file_path, file_name)
+            if sent:
+                include_files = self._collect_include_files(file_path, input_dir_path)
+                for include_name, include_path in include_files:
+                    print(f"  Sending include '{include_name}' to worker {worker_id}...")
+                    self._send_file_to_worker(worker_addr, str(include_path), include_name)
     
-    def _send_file_to_worker(self, worker_addr: str, file_path: str, file_name: str) -> None:
+    def _send_file_to_worker(self, worker_addr: str, file_path: str, file_name: str) -> bool:
         """
         Send a file to a specific worker node.
         
@@ -86,7 +96,7 @@ class Controller:
             port = int(port)
         except (ValueError, IndexError):
             print(f"  Error: Invalid worker address format '{worker_addr}'")
-            return
+            return False
         
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -101,13 +111,76 @@ class Controller:
                 print(f"  ✗ No acknowledgment from worker")
             
             sock.close()
-            
+            return success
         except socket.timeout:
             print(f"  ✗ Connection timeout (worker may not be running)")
         except ConnectionRefusedError:
             print(f"  ✗ Connection refused (worker not listening on {worker_addr})")
         except Exception as e:
             print(f"  ✗ Error: {e}")
+        return False
+
+    def _collect_include_files(self, file_path: str, input_dir_path: Path) -> List[Tuple[str, Path]]:
+        """
+        Parse include statements from a QASM file and resolve their paths.
+
+        Args:
+            file_path: Path to the QASM file being sent
+            input_dir_path: Base directory used for distribution
+
+        Returns:
+            List of (include_name, include_path) pairs in file order.
+        """
+        include_names = self._extract_includes(file_path)
+        resolved: List[Tuple[str, Path]] = []
+        seen: set = set()
+
+        for include_name in include_names:
+            include_path = self._resolve_include_path(include_name, Path(file_path), input_dir_path)
+            if include_path is None:
+                print(f"  Warning: Include file '{include_name}' not found for '{Path(file_path).name}'")
+                continue
+            key = (include_name, str(include_path))
+            if key in seen:
+                continue
+            seen.add(key)
+            resolved.append((include_name, include_path))
+
+        return resolved
+
+    def _extract_includes(self, file_path: str) -> List[str]:
+        """Extract include file names from a QASM file."""
+        includes: List[str] = []
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    match = self.INCLUDE_PATTERN.match(line)
+                    if match:
+                        includes.append(match.group(1))
+        except Exception as e:
+            print(f"  Warning: Could not read includes from '{Path(file_path).name}': {e}")
+        return includes
+
+    def _resolve_include_path(
+        self,
+        include_name: str,
+        qasm_path: Path,
+        input_dir_path: Path,
+    ) -> Optional[Path]:
+        """Resolve include file path relative to the QASM file and its parent directories."""
+        include_path = Path(include_name)
+        if include_path.is_absolute() and include_path.exists():
+            return include_path
+
+        search_root = input_dir_path.parent if input_dir_path.parent else input_dir_path
+        for candidate_dir in [qasm_path.parent, *qasm_path.parent.parents]:
+            candidate = candidate_dir / include_path
+            if candidate.exists():
+                return candidate
+            if candidate_dir == search_root:
+                break
+
+        return None
 
 
 def main():
