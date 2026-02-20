@@ -261,6 +261,10 @@ task cleanPython {
     }
 }
 
+tasks.named('setupPythonEnv') {
+    mustRunAfter tasks.named('cleanPython')
+}
+
 task run(type: Exec) {
     description = 'Runs the DQC - OpenQASM Splitter GUI application'
     dependsOn build
