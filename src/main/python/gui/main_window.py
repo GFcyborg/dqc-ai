@@ -1457,35 +1457,40 @@ class QasmAnalyzerGUI:
                 parent_dialog.deiconify()
                 self._focus_window(parent_dialog)
 
-        def show_remote_runtime_status():
-            """Placeholder view for remote runtime status."""
-            for child in dist_dialog.winfo_children():
-                child.destroy()
-
-            status_frame = ttk.Frame(dist_dialog, padding="20")
-            status_frame.pack(fill=tk.BOTH, expand=True)
-
-            ttk.Label(
-                status_frame,
-                text="Remote Runtime Status (placeholder)",
-                font=('Arial', 12, 'bold'),
-            ).pack(anchor=tk.W, pady=(0, 10))
-
-            status_text = scrolledtext.ScrolledText(status_frame, height=12, font=('Courier', 9),
-                                                    wrap=tk.NONE, state='normal')
-            status_text.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-
-            status_text.insert(tk.END, "Worker runtime status is not implemented yet.\n\n")
+        def run_remote_chunks():
+            """Trigger execution of chunks on remote workers."""
+            controller_output.insert(tk.END, f"\n[{self._timestamp()}] ", 'normal')
+            controller_output.insert(tk.END, "Starting remote execution...\n", 'success')
+            controller_output.see(tk.END)
+            
+            # Disable the button during execution
+            run_remote_btn.config(state='disabled', bg='#B0B0B0')
+            
+            # Log execution start for each worker
             for worker_id in sorted(worker_config.keys(), key=lambda x: int(x)):
-                status_text.insert(tk.END, f"Worker {worker_id}: status unknown\n")
-            status_text.config(state='disabled')
-
-            ttk.Button(status_frame, text="Close", command=on_close).pack(anchor=tk.E)
+                worker_addr = worker_config[worker_id]
+                controller_output.insert(tk.END, f"[{self._timestamp()}] Triggering execution on Worker {worker_id} ({worker_addr})...\n", 'normal')
+                controller_output.see(tk.END)
+                
+                # If localhost mode, also log to worker output
+                if localhost_mode and worker_id in worker_outputs:
+                    worker_outputs[worker_id].insert(tk.END, f"\n[{self._timestamp()}] ", 'normal')
+                    worker_outputs[worker_id].insert(tk.END, "Execution triggered\n", 'success')
+                    worker_outputs[worker_id].insert(tk.END, f"[{self._timestamp()}] Processing chunk...\n", 'normal')
+                    worker_outputs[worker_id].see(tk.END)
+            
+            controller_output.insert(tk.END, f"\n[{self._timestamp()}] ", 'normal')
+            controller_output.insert(tk.END, "⚠ Note: Remote execution protocol not yet fully implemented.\n", 'warning')
+            controller_output.insert(tk.END, f"[{self._timestamp()}] Workers should process received chunks.\n", 'normal')
+            controller_output.see(tk.END)
+            
+            # Re-enable button after a short delay
+            self.root.after(2000, lambda: run_remote_btn.config(state='normal', bg='#E53935'))
 
         run_remote_btn = tk.Button(
             ctrl_control_frame,
-            text="Run remote chunks",
-            command=show_remote_runtime_status,
+            text="▶ Run remote chunks",
+            command=run_remote_chunks,
             state='disabled',
             bg='#B0B0B0',
             fg='white',
