@@ -154,6 +154,7 @@ class QasmAnalyzerGUI:
         
         self._add_ast_tab()
         self._add_analysis_tab()
+        self.notebook.select(self.analysis_tab)
     
     def _add_ast_tab(self):
         ast_frame = ttk.Frame(self.notebook)
@@ -187,10 +188,10 @@ class QasmAnalyzerGUI:
         self.ast_tree.heading('text', text='Text', anchor=tk.W)
     
     def _add_analysis_tab(self):
-        analysis_frame = ttk.Frame(self.notebook)
-        self.notebook.add(analysis_frame, text="Variable Analysis")
+        self.analysis_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.analysis_tab, text="Variable Analysis")
         
-        self.analysis_text = scrolledtext.ScrolledText(analysis_frame, wrap=tk.WORD,
+        self.analysis_text = scrolledtext.ScrolledText(self.analysis_tab, wrap=tk.WORD,
                                                        font=self.code_font)
         self.analysis_text.pack(fill=tk.BOTH, expand=True)
     
