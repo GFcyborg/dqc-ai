@@ -1459,33 +1459,121 @@ class QasmAnalyzerGUI:
 
         def run_remote_chunks():
             """Trigger execution of chunks on remote workers."""
+            from choreo.controller import Controller
+            import threading
+            import queue as queue_module
+            
             controller_output.insert(tk.END, f"\n[{self._timestamp()}] ", 'normal')
             controller_output.insert(tk.END, "Starting remote execution...\n", 'success')
             controller_output.see(tk.END)
             
             # Disable the button during execution
             run_remote_btn.config(state='disabled', bg='#B0B0B0')
+            distribute_btn.config(state='disabled')
             
-            # Log execution start for each worker
-            for worker_id in sorted(worker_config.keys(), key=lambda x: int(x)):
-                worker_addr = worker_config[worker_id]
-                controller_output.insert(tk.END, f"[{self._timestamp()}] Triggering execution on Worker {worker_id} ({worker_addr})...\n", 'normal')
-                controller_output.see(tk.END)
+            # Create a queue for thread-safe communication
+            exec_queue = queue_module.Queue()
+            thread_state = {'done': False}
+            
+            def log_output(message: str) -> None:
+                """Thread-safe logging using queue."""
+                exec_queue.put(message)
+            
+            def poll_queue():
+                """Poll the execution queue and update GUI."""
+                try:
+                    # Process all available messages
+                    try:
+                        while True:
+                            message = exec_queue.get_nowait()
+                            if message and message.strip():
+                                # Parse message to detect control messages
+                                if "✓" in message:  # Success
+                                    tag = 'success'
+                                elif "✗" in message or "Error" in message or "error" in message.lower():  # Error
+                                    tag = 'error'
+                                elif "→" in message:  # En route
+                                    tag = 'success'
+                                else:
+                                    tag = 'normal'
+                                
+                                if controller_output.winfo_exists():
+                                    controller_output.insert(tk.END, f"[{self._timestamp()}] {message}\n", tag)
+                                    controller_output.see(tk.END)
+                    except queue_module.Empty:
+                        pass
+                    
+                    # Check if thread is done
+                    if thread_state['done']:
+                        # Re-enable button
+                        if run_remote_btn.winfo_exists():
+                            run_remote_btn.config(state='normal', bg='#E53935')
+                        if distribute_btn.winfo_exists():
+                            distribute_btn.config(state='normal')
+                        return
+                    
+                    # Continue polling
+                    if run_remote_btn.winfo_exists():
+                        self.root.after(50, poll_queue)
+                        
+                except tk.TclError:
+                    # Widget destroyed
+                    return
+                except Exception as e:
+                    print(f"Poll error: {e}")
+            
+            def execute_in_thread():
+                """Execute chunks in a separate thread."""
+                import sys
+                print("\n[GUI-EXEC-THREAD] STARTED", file=sys.stderr)
+                sys.stderr.flush()
                 
-                # If localhost mode, also log to worker output
-                if localhost_mode and worker_id in worker_outputs:
-                    worker_outputs[worker_id].insert(tk.END, f"\n[{self._timestamp()}] ", 'normal')
-                    worker_outputs[worker_id].insert(tk.END, "Execution triggered\n", 'success')
-                    worker_outputs[worker_id].insert(tk.END, f"[{self._timestamp()}] Processing chunk...\n", 'normal')
-                    worker_outputs[worker_id].see(tk.END)
+                try:
+                    print(f"[GUI-EXEC-THREAD] Loading configuration from: {config_file}", file=sys.stderr)
+                    sys.stderr.flush()
+                    exec_queue.put(f"Loading configuration from: {config_file}")
+                    
+                    print(f"[GUI-EXEC-THREAD] Creating Controller...", file=sys.stderr)
+                    sys.stderr.flush()
+                    controller = Controller(Path(config_file))
+                    
+                    print(f"[GUI-EXEC-THREAD] Controller created. Workers: {controller.workers}", file=sys.stderr)
+                    sys.stderr.flush()
+                    exec_queue.put(f"✓ Configuration loaded. Workers: {controller.workers}")
+                    exec_queue.put("")
+                    
+                    print(f"[GUI-EXEC-THREAD] Calling execute_chunks()...", file=sys.stderr)
+                    sys.stderr.flush()
+                    result = controller.execute_chunks(output_callback=log_output)
+                    
+                    print(f"[GUI-EXEC-THREAD] execute_chunks() returned: {result}", file=sys.stderr)
+                    sys.stderr.flush()
+                    exec_queue.put(f"✓ Execute chunks returned: {result}")
+                    
+                except FileNotFoundError as e:
+                    print(f"[GUI-EXEC-THREAD-ERROR] FileNotFoundError: {e}", file=sys.stderr)
+                    sys.stderr.flush()
+                    exec_queue.put(f"✗ CONFIG FILE NOT FOUND: {e}")
+                except Exception as e:
+                    import traceback
+                    print(f"[GUI-EXEC-THREAD-ERROR] {type(e).__name__}: {e}", file=sys.stderr)
+                    print(traceback.format_exc(), file=sys.stderr)
+                    sys.stderr.flush()
+                    exec_queue.put(f"✗ Execution error: {type(e).__name__}: {e}")
+                    for line in traceback.format_exc().split('\n'):
+                        if line.strip():
+                            exec_queue.put(f"  {line}")
+                finally:
+                    print("[GUI-EXEC-THREAD] COMPLETED", file=sys.stderr)
+                    sys.stderr.flush()
+                    thread_state['done'] = True
             
-            controller_output.insert(tk.END, f"\n[{self._timestamp()}] ", 'normal')
-            controller_output.insert(tk.END, "⚠ Note: Remote execution protocol not yet fully implemented.\n", 'warning')
-            controller_output.insert(tk.END, f"[{self._timestamp()}] Workers should process received chunks.\n", 'normal')
-            controller_output.see(tk.END)
+            # Start execution thread
+            exec_thread = threading.Thread(target=execute_in_thread, daemon=True)
+            exec_thread.start()
             
-            # Re-enable button after a short delay
-            self.root.after(2000, lambda: run_remote_btn.config(state='normal', bg='#E53935'))
+            # Start polling
+            poll_queue()
 
         run_remote_btn = tk.Button(
             ctrl_control_frame,

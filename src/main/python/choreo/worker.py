@@ -98,29 +98,134 @@ class Worker:
     
     def _handle_client(self, client_socket: socket.socket, client_addr: tuple) -> None:
         """
-        Handle incoming file transfer from controller.
+        Handle incoming request from controller (file transfer or execution command).
         
         Args:
             client_socket: Socket connection from client
             client_addr: Client address (host, port)
         """
         try:
-            success, output_path = FileTransferProtocol.receive_file(client_socket, self.output_dir)
+            # Read command byte to determine request type
+            self._emit(f"[{client_addr[0]}:{client_addr[1]}] New connection, waiting for command byte...")
+            cmd_byte = client_socket.recv(1)
+            if not cmd_byte:
+                self._emit(f"[{client_addr[0]}:{client_addr[1]}] No data received (connection closed)")
+                return
             
-            if success and output_path:
-                file_size = os.path.getsize(output_path)
-                file_name = os.path.basename(output_path)
-                self._emit(
-                    f"[{client_addr[0]}:{client_addr[1]}] ✓ File '{file_name}' received successfully ({file_size} bytes)"
-                )
+            self._emit(f"[{client_addr[0]}:{client_addr[1]}] Command byte received: {cmd_byte.hex()}")
+            
+            if cmd_byte == FileTransferProtocol.CMD_FILE_TRANSFER:
+                # Handle file transfer
+                self._emit(f"[{client_addr[0]}:{client_addr[1]}] Processing file transfer...")
+                success, output_path = FileTransferProtocol.receive_file(client_socket, self.output_dir)
+                
+                if success and output_path:
+                    file_size = os.path.getsize(output_path)
+                    file_name = os.path.basename(output_path)
+                    self._emit(
+                        f"[{client_addr[0]}:{client_addr[1]}] ✓ File '{file_name}' received successfully ({file_size} bytes)"
+                    )
+                else:
+                    self._emit(f"[{client_addr[0]}:{client_addr[1]}] ✗ Failed to receive file")
+            
+            elif cmd_byte == FileTransferProtocol.CMD_EXECUTE_CHUNK:
+                # Handle execution command
+                self._emit(f"[{client_addr[0]}:{client_addr[1]}] Processing execution command...")
+                self._emit(f"[{client_addr[0]}:{client_addr[1]}] Reading chunk ID...")
+                chunk_id = FileTransferProtocol.receive_execute_command(client_socket)
+                
+                if chunk_id is not None:
+                    self._emit(f"[{client_addr[0]}:{client_addr[1]}] ▶ Execution command received for chunk {chunk_id}")
+                    
+                    # Send ACK_STARTED
+                    try:
+                        self._emit(f"Sending ACK_STARTED ({len(FileTransferProtocol.ACK_STARTED)} bytes)...")
+                        client_socket.sendall(FileTransferProtocol.ACK_STARTED)
+                        self._emit(f"✓ ACK_STARTED sent")
+                        self._emit(f"Acknowledged execution start for chunk {chunk_id}")
+                    except Exception as e:
+                        self._emit(f"✗ Error sending ACK_STARTED: {type(e).__name__}: {e}")
+                        return
+                    
+                    # Execute the chunk (simulation)
+                    try:
+                        self._execute_chunk_simulation(chunk_id)
+                    except Exception as e:
+                        self._emit(f"✗ Error during simulation: {type(e).__name__}: {e}")
+                    
+                    # Send DONE
+                    try:
+                        self._emit(f"Sending DONE ({len(FileTransferProtocol.DONE)} bytes)...")
+                        client_socket.sendall(FileTransferProtocol.DONE)
+                        self._emit(f"✓ DONE sent")
+                        self._emit(f"✓ Chunk {chunk_id} execution completed")
+                    except Exception as e:
+                        self._emit(f"✗ Error sending DONE: {type(e).__name__}: {e}")
+                else:
+                    self._emit(f"[{client_addr[0]}:{client_addr[1]}] ✗ Failed to receive chunk ID")
             else:
-                self._emit(f"[{client_addr[0]}:{client_addr[1]}] ✗ Failed to receive file")
+                self._emit(f"[{client_addr[0]}:{client_addr[1]}] ✗ Unknown command byte: {cmd_byte.hex()}")
         
         except Exception as e:
-            self._emit(f"[{client_addr[0]}:{client_addr[1]}] Error: {e}")
+            self._emit(f"[{client_addr[0]}:{client_addr[1]}] Error: {type(e).__name__}: {e}")
         
         finally:
             client_socket.close()
+    
+    def _execute_chunk_simulation(self, chunk_id: str) -> None:
+        """
+        Simulate execution of a QASM chunk.
+        
+        Args:
+            chunk_id: ID of the chunk to execute (e.g., "0", "1", "2")
+        """
+        import re
+        import time
+        
+        # Find the chunk file
+        chunk_file = os.path.join(self.output_dir, f"{chunk_id}.qasm")
+        
+        if not os.path.exists(chunk_file):
+            self._emit(f"  ✗ Error: Chunk file '{chunk_id}.qasm' not found in {self.output_dir}")
+            return
+        
+        self._emit(f"  Simulating execution of chunk '{chunk_id}.qasm'...")
+        
+        # Parse the file
+        includes = []
+        variables = []
+        
+        try:
+            with open(chunk_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # Extract include statements
+            include_pattern = re.compile(r'^\s*include\s+"([^"]+)"\s*;', re.MULTILINE)
+            includes = include_pattern.findall(content)
+            
+            # Extract variable declarations (qubit, bit, int, float, etc.)
+            var_pattern = re.compile(r'^\s*(?:qubit|bit|int|float|angle|bool)\s+(\w+)', re.MULTILINE)
+            variables = var_pattern.findall(content)
+            
+            # Display parsed information
+            if includes:
+                self._emit(f"  Includes: {', '.join(includes)}")
+            else:
+                self._emit(f"  Includes: (none)")
+            
+            if variables:
+                self._emit(f"  Variables: {', '.join(variables)}")
+            else:
+                self._emit(f"  Variables: (none)")
+            
+            # Simulate execution time
+            self._emit(f"  Executing... (simulated 5s delay)")
+            time.sleep(5)
+            
+            self._emit(f"  ✓ Simulation complete for chunk {chunk_id}")
+            
+        except Exception as e:
+            self._emit(f"  ✗ Error during simulation: {e}")
     
     def stop(self) -> None:
         """Stop the worker server."""

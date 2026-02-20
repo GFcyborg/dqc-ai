@@ -17,7 +17,7 @@ import sys
 import argparse
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Callable
 import time
 
 from .protocol import FileTransferProtocol
@@ -81,6 +81,166 @@ class Controller:
                 for include_name, include_path in include_files:
                     print(f"  Sending include '{include_name}' to worker {worker_id}...")
                     self._send_file_to_worker(worker_addr, str(include_path), include_name)
+    
+    def execute_chunks(self, output_callback: Optional[Callable] = None) -> bool:
+        """
+        Execute chunks on workers in sequential order.
+        
+        This sends execution commands to workers one by one (0, 1, 2, ...),
+        waiting for each worker to start and complete before moving to the next.
+        
+        Args:
+            output_callback: Optional callback function for logging output
+            
+        Returns:
+            True if all executions completed successfully, False otherwise
+        """
+        import sys
+        
+        # IMMEDIATE stderr output to ensure we see this
+        print("\n" + "="*60, file=sys.stderr)
+        print("execute_chunks() CALLED!", file=sys.stderr)
+        print(f"self.workers = {self.workers}", file=sys.stderr)
+        print("="*60, file=sys.stderr)
+        sys.stderr.flush()
+        
+        def log(message: str) -> None:
+            """Log a message via callback or print."""
+            # ALWAYS print to stderr first
+            print(f"[CTRL-LOG] {message}", file=sys.stderr)
+            sys.stderr.flush()
+            
+            # Then try callback
+            if output_callback:
+                try:
+                    output_callback(message)
+                except Exception as e:
+                    print(f"[CTRL-CALLBACK-ERROR] {type(e).__name__}: {e}", file=sys.stderr)
+                    sys.stderr.flush()
+            else:
+                print(message)
+        
+        log(f"\n{'='*60}")
+        log("Starting sequential chunk execution")
+        log(f"{'='*60}")
+        log(f"Workers configured: {self.workers}")
+        log("")
+        
+        # Get sorted list of worker IDs
+        worker_ids = sorted(self.workers.keys(), key=lambda x: int(x))
+        total_workers = len(worker_ids)
+        
+        log(f"Total workers to execute: {total_workers}")
+        log(f"Worker IDs to process: {worker_ids}\n")
+        
+        all_success = True
+        
+        for idx, worker_id in enumerate(worker_ids, 1):
+            worker_addr = self.workers[worker_id]
+            
+            log(f"[{idx}/{total_workers}] Executing chunk {worker_id}")
+            log(f"  Worker address: {worker_addr}")
+            log(f"  Attempting connection...")
+            
+            success = self._execute_chunk_on_worker(worker_addr, worker_id, log)
+            
+            if success:
+                log(f"  ✓ Worker {worker_id} completed execution\n")
+            else:
+                log(f"  ✗ Worker {worker_id} execution FAILED\n")
+                all_success = False
+                # Continue with next worker even if this one failed
+        
+        log(f"{'='*60}")
+        if all_success:
+            log("✓ All chunks executed successfully")
+        else:
+            log("⚠ Some chunk executions failed")
+        log(f"{'='*60}\n")
+        
+        print("[CTRL-LOG] execute_chunks() COMPLETED", file=sys.stderr)
+        sys.stderr.flush()
+        
+        return all_success
+    
+    def _execute_chunk_on_worker(self, worker_addr: str, chunk_id: str, log: callable) -> bool:
+        """
+        Execute a chunk on a specific worker.
+        
+        Args:
+            worker_addr: Worker address in format "host:port"
+            chunk_id: ID of the chunk to execute
+            log: Logging function
+            
+        Returns:
+            True if execution completed successfully, False otherwise
+        """
+        import sys
+        print(f"[CTRL-EXEC] Starting execution on {worker_addr} for chunk {chunk_id}", file=sys.stderr)
+        
+        try:
+            host, port = worker_addr.rsplit(':', 1)
+            port = int(port)
+        except (ValueError, IndexError):
+            msg = f"Invalid worker address format '{worker_addr}'"
+            log(f"    ✗ {msg}")
+            print(f"[CTRL-EXEC-ERROR] {msg}", file=sys.stderr)
+            return False
+        
+        try:
+            log(f"    → Attempting to connect to {host}:{port}...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(30)  # Longer timeout for execution (includes 5s simulation)
+            sock.connect((host, port))
+            log(f"    ✓ Connected successfully")
+            print(f"[CTRL-EXEC] Connected to {host}:{port}", file=sys.stderr)
+            
+            log(f"    → Sending execute command for chunk {chunk_id}...")
+            print(f"[CTRL-EXEC] Sending execute command: {chunk_id}", file=sys.stderr)
+            started, completed = FileTransferProtocol.send_execute_command(sock, chunk_id)
+            print(f"[CTRL-EXEC] Response: started={started}, completed={completed}", file=sys.stderr)
+            
+            if not started:
+                msg = f"Worker did not acknowledge start"
+                log(f"    ✗ {msg}")
+                print(f"[CTRL-EXEC-ERROR] {msg}", file=sys.stderr)
+                sock.close()
+                return False
+            
+            log(f"    ✓ Execution started")
+            
+            if not completed:
+                msg = f"Worker did not send completion signal"
+                log(f"    ✗ {msg}")
+                print(f"[CTRL-EXEC-ERROR] {msg}", file=sys.stderr)
+                sock.close()
+                return False
+            
+            log(f"    ✓ Execution completed successfully")
+            sock.close()
+            print(f"[CTRL-EXEC] Execution completed successfully", file=sys.stderr)
+            return True
+            
+        except socket.timeout:
+            msg = f"Connection to {host}:{port} timed out after 30 seconds"
+            log(f"    ✗ TIMEOUT: {msg}")
+            print(f"[CTRL-EXEC-ERROR] {msg}", file=sys.stderr)
+            return False
+        except ConnectionRefusedError:
+            msg = f"No worker listening on {host}:{port}"
+            log(f"    ✗ CONNECTION REFUSED: {msg}")
+            print(f"[CTRL-EXEC-ERROR] {msg}", file=sys.stderr)
+            return False
+        except OSError as e:
+            msg = f"Network error: {e}"
+            log(f"    ✗ NETWORK ERROR: {msg}")
+            print(f"[CTRL-EXEC-ERROR] {msg}", file=sys.stderr)
+            return False
+        except Exception as e:
+            msg = f"Unexpected error: {type(e).__name__}: {e}"
+            log(f"    ✗ UNEXPECTED ERROR: {msg}")
+            print(f"[CTRL-EXEC-ERROR] {msg}", file=sys.stderr)
+            return False
     
     def _send_file_to_worker(self, worker_addr: str, file_path: str, file_name: str) -> bool:
         """
