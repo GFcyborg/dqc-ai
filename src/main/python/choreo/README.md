@@ -2,11 +2,15 @@
 
 Distributed orchestration system for quantum circuit processing. Implements a controller-worker architecture for distributing quantum circuit files across multiple nodes.
 
+Workers can run on **local machine** (for GUI integration) or **remote hosts** (standalone deployment for production).
+
 ## Architecture
 
 - **Controller**: Coordinates task distribution to worker nodes based on a configuration mapping
 - **Worker**: Listens for incoming files and processes them independently  
 - **Protocol**: Binary file transfer protocol for reliable node-to-node communication
+
+⚠️ **For remote worker deployment, see [REMOTE_DEPLOYMENT.md](../../REMOTE_DEPLOYMENT.md)**
 
 ## Quick Start
 

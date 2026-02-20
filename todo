@@ -1,6 +1,6 @@
 ToDo:
 --
-add menu items: license + link to git repo https://github.com/GFcyborg/dqc-ai
+stand-alone workers (not in GUI) + doc
 add tests
 inject openqasm teleportations in a specific line
 explain how the chunk-vars are identified for exchange
@@ -9,10 +9,10 @@ signaling protocol among controller/worker nodes
 data-exchange protocol among worker-nodes
 ...
 
+WorkFlow:
 take 1 qasm file
 >> insert split-point manually (=> automatic pragma insertion in *.dqc file)
 >> look for split pragma
->> split orig file into numbered chunks of pure openqasm (i.e. remove split pragmas) into a dir named after the original qasm file; eventually [put stdlib include on top of each chunk]
->> find out which data/vars are needed into next chunk (now it's only in comments as header of each chunk)
->> insert teleport pragma
->> accordingly controller orchestrates comm among workers, but data is share directly inter-workers (via teleportation)
+>> split orig file into numbered chunks of pure openqasm (i.e. remove split pragmas) into a dir named after the original qasm file; eventually [put stdlib include on top of each chunk]; also save a dqc file to keep the pragmas (split-points)
+>> find out which data/vars are needed into next chunk (e.g. comments as header of each chunk)
+>> teleportation should happen at runtime among worker-nodes according to their var-dependency analysis, XOR under controller orchestration: controller orchestrates comm among workers, but data is shared directly inter-workers via teleportation (control-plane VS data-plane).

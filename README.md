@@ -88,6 +88,30 @@ When distributing:
 ./gradlew setupPythonEnv       # Setup Python environment only
 ```
 
+## Distributed Processing
+
+### Local Workers (GUI Integration)
+Use the GUI's "Tools → Controller" feature to manage local workers on the same machine.
+
+### Remote Workers (Production Deployment)
+Run workers on remote hosts for distributed processing:
+
+```bash
+# On remote host
+python3 start_worker.py 6660 --host 0.0.0.0
+
+# On controller host
+python3 start_controller.py ./split-out --config workers_filesrv.json
+```
+
+📖 **See [REMOTE_DEPLOYMENT.md](REMOTE_DEPLOYMENT.md) for complete setup instructions**
+
+Features:
+- ✅ No external dependencies
+- ✅ Works on any Python 3.8+ environment
+- ✅ Simple network protocol
+- ✅ Suitable for cloud, HPC, and on-premises deployment
+
 ## Testing
 
 ```bash
